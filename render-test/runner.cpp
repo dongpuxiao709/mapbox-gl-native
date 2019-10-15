@@ -34,6 +34,23 @@
 
 using namespace mbgl;
 
+GfxProbe::GfxProbe(const mbgl::gfx::RenderingStats& stats)
+    : numBuffers(stats.numBuffers),
+      numDrawCalls(stats.numDrawCalls),
+      numFrameBuffers(stats.numFrameBuffers),
+      numTextures(stats.numActiveTextures),
+      memIndexBuffers(stats.memIndexBuffers, stats.memIndexBuffers),
+      memVertexBuffers(stats.memVertexBuffers, stats.memVertexBuffers),
+      memTextures(stats.memTextures, stats.memTextures) {}
+
+struct RunContext {
+    RunContext() = default;
+
+    GfxProbe activeGfxProbe;
+    GfxProbe baselineGfxProbe;
+    bool gfxProbeActive;
+};
+
 class TestRunnerMapObserver : public MapObserver {
 public:
     TestRunnerMapObserver() : mapLoadFailure(false), finishRenderingMap(false), idle(false) {}
@@ -383,10 +400,87 @@ bool TestRunner::checkRenderTestResults(mbgl::PremultipliedImage&& actualImage, 
             return false;
         }
     }
+    // Check gfx metrics
+    for (const auto& expected : metadata.expectedMetrics.gfx) {
+        auto actual = metadata.metrics.gfx.find(expected.first);
+        if (actual == metadata.metrics.gfx.end()) {
+            metadata.errorMessage = "Failed to find gfx probe: " + expected.first;
+            return false;
+        }
+
+        auto check = [&metadata](
+                         const char* msg, const std::string& name, const auto& expected, const auto& actual) -> bool {
+            if (expected != actual) {
+                char msgBuf[512];
+                snprintf(msgBuf, sizeof(msgBuf), msg, name.c_str(), actual, expected);
+                if (metadata.errorMessage.length()) metadata.errorMessage += ". ";
+                metadata.errorMessage += msgBuf;
+                return false;
+            }
+            return true;
+        };
+
+        const auto& probeName = expected.first;
+        const auto& expectedValue = expected.second;
+        const auto& actualValue = actual->second;
+        bool failed = false;
+
+        if (!check("Number of draw calls at probe \"%s\" is %i, expected is %i",
+                   probeName,
+                   expectedValue.numDrawCalls,
+                   actualValue.numDrawCalls)) {
+            failed = true;
+        }
+
+        if (!check("Number of textures at probe \"%s\" is %i, expected is %i",
+                   probeName,
+                   expectedValue.numTextures,
+                   actualValue.numTextures)) {
+            failed = true;
+        }
+
+        if (!check("Number of vertex and index buffers at probe \"%s\" is %i, expected is %i",
+                   probeName,
+                   expectedValue.numBuffers,
+                   actualValue.numBuffers)) {
+            failed = true;
+        }
+
+        if (!check("Number of frame buffers at probe \"%s\" is %i, expected is %i",
+                   probeName,
+                   expectedValue.numFrameBuffers,
+                   actualValue.numFrameBuffers)) {
+            failed = true;
+        }
+
+        if (!check("Allocated texture memory peak size at probe \"%s\" is %i bytes, expected is %i bytes",
+                   probeName,
+                   expectedValue.memTextures.peak,
+                   actualValue.memTextures.peak)) {
+            failed = true;
+        }
+
+        if (!check("Allocated index buffer memory peak size at probe \"%s\" is %i bytes, expected is %i bytes",
+                   probeName,
+                   expectedValue.memIndexBuffers.peak,
+                   actualValue.memIndexBuffers.peak)) {
+            failed = true;
+        }
+
+        if (!check("Allocated vertex buffer memory peak size at probe \"%s\" is %i bytes, expected is %i bytes",
+                   probeName,
+                   expectedValue.memVertexBuffers.peak,
+                   actualValue.memVertexBuffers.peak)) {
+            failed = true;
+        }
+
+        if (failed) return false;
+    }
+
     return true;
 }
 
-bool TestRunner::runOperations(const std::string& key, TestMetadata& metadata) {
+bool TestRunner::runOperations(const std::string& key, TestMetadata& metadata, RunContext& ctx) {
     if (!metadata.document.HasMember("metadata") || !metadata.document["metadata"].HasMember("test") ||
         !metadata.document["metadata"]["test"].HasMember("operations")) {
         return true;
@@ -438,6 +532,9 @@ bool TestRunner::runOperations(const std::string& key, TestMetadata& metadata) {
     static const std::string getFeatureStateOp("getFeatureState");
     static const std::string removeFeatureStateOp("removeFeatureState");
     static const std::string panGestureOp("panGesture");
+    static const std::string gfxProbeOp("probeGFX");
+    static const std::string gfxProbeStartOp("probeGFXStart");
+    static const std::string gfxProbeEndOp("probeGFXEnd");
 
     if (operationArray[0].GetString() == waitOp) {
         // wait
@@ -947,13 +1044,47 @@ bool TestRunner::runOperations(const std::string& key, TestMetadata& metadata) {
 
         metadata.metrics.fps.insert({std::move(mark), {averageFps, minOnePcFps, 0.0f}});
 
+    } else if (operationArray[0].GetString() == gfxProbeStartOp) {
+        // probeGFXStart
+        assert(!ctx.gfxProbeActive);
+        ctx.gfxProbeActive = true;
+        ctx.baselineGfxProbe = ctx.activeGfxProbe;
+    } else if (operationArray[0].GetString() == gfxProbeEndOp) {
+        // probeGFXEnd
+        assert(ctx.gfxProbeActive);
+        ctx.gfxProbeActive = false;
+    } else if (operationArray[0].GetString() == gfxProbeOp) {
+        // probeGFX
+        assert(operationArray.Size() >= 2u);
+        assert(operationArray[1].IsString());
+
+        std::string mark = std::string(operationArray[1].GetString(), operationArray[1].GetStringLength());
+
+        // Render the map and fetch rendering stats
+        gfx::RenderingStats stats;
+
+        try {
+            stats = frontend.render(map).stats;
+        } catch (const std::exception&) {
+            return false;
+        }
+
+        ctx.activeGfxProbe = GfxProbe(stats);
+
+        // Compare memory allocations to the baseline probe
+        GfxProbe metricProbe = ctx.activeGfxProbe;
+        metricProbe.memIndexBuffers.peak -= ctx.baselineGfxProbe.memIndexBuffers.peak;
+        metricProbe.memVertexBuffers.peak -= ctx.baselineGfxProbe.memVertexBuffers.peak;
+        metricProbe.memTextures.peak -= ctx.baselineGfxProbe.memTextures.peak;
+        metadata.metrics.gfx.insert({mark, metricProbe});
+
     } else {
         metadata.errorMessage = std::string("Unsupported operation: ") + operationArray[0].GetString();
         return false;
     }
 
     operationsArray.Erase(operationIt);
-    return runOperations(key, metadata);
+    return runOperations(key, metadata, ctx);
 }
 
 TestRunner::Impl::Impl(const TestMetadata& metadata)
@@ -994,13 +1125,15 @@ bool TestRunner::run(TestMetadata& metadata) {
     map.getStyle().loadJSON(serializeJsonValue(metadata.document));
     map.jumpTo(map.getStyle().getDefaultCamera());
 
-    if (!runOperations(key, metadata)) {
+    RunContext ctx{};
+
+    if (!runOperations(key, metadata, ctx)) {
         return false;
     }
 
     mbgl::PremultipliedImage image;
     try {
-        if (metadata.outputsImage) image = frontend.render(map);
+        if (metadata.outputsImage) image = frontend.render(map).image;
     } catch (const std::exception&) {
         return false;
     }
