@@ -116,11 +116,13 @@ GeometryTileWorker::~GeometryTileWorker() = default;
    completed parse.
 */
 
-void GeometryTileWorker::setData(std::unique_ptr<const GeometryTileData> data_, bool resetLayers_, uint64_t correlationID_) {
+void GeometryTileWorker::setData(std::unique_ptr<const GeometryTileData> data_,
+                                 std::set<std::string> availableImages_,
+                                 uint64_t correlationID_) {
     try {
         data = std::move(data_);
         correlationID = correlationID_;
-        if (resetLayers_) layers = nullopt;
+        availableImages = std::move(availableImages_);
 
         switch (state) {
         case Idle:
@@ -139,10 +141,13 @@ void GeometryTileWorker::setData(std::unique_ptr<const GeometryTileData> data_, 
     }
 }
 
-void GeometryTileWorker::setLayers(std::vector<Immutable<LayerProperties>> layers_, uint64_t correlationID_) {
+void GeometryTileWorker::setLayers(std::vector<Immutable<LayerProperties>> layers_,
+                                   std::set<std::string> availableImages_,
+                                   uint64_t correlationID_) {
     try {
         layers = std::move(layers_);
         correlationID = correlationID_;
+        availableImages = std::move(availableImages_);
 
         switch (state) {
         case Idle:
@@ -160,6 +165,22 @@ void GeometryTileWorker::setLayers(std::vector<Immutable<LayerProperties>> layer
         }
     } catch (...) {
         parent.invoke(&GeometryTile::onError, std::current_exception(), correlationID);
+    }
+}
+
+void GeometryTileWorker::reset(uint64_t correlationID_) {
+    layers = nullopt;
+    data = nullopt;
+    correlationID = correlationID_;
+
+    switch (state) {
+        case Idle:
+        case NeedsParse:
+            break;
+        case Coalescing:
+        case NeedsSymbolLayout:
+            state = NeedsParse;
+            break;
     }
 }
 
@@ -365,11 +386,12 @@ void GeometryTileWorker::parse() {
         // and either immediately create a bucket if no images/glyphs are used, or the Layout is stored until
         // the images/glyphs are available to add the features to the buckets.
         if (leaderImpl.getTypeInfo()->layout == LayerTypeInfo::Layout::Required) {
-            std::unique_ptr<Layout> layout = LayerManager::get()->createLayout({parameters, glyphDependencies, imageDependencies}, std::move(geometryLayer), group);
+            std::unique_ptr<Layout> layout = LayerManager::get()->createLayout(
+                {parameters, glyphDependencies, imageDependencies, availableImages}, std::move(geometryLayer), group);
             if (layout->hasDependencies()) {
                 layouts.push_back(std::move(layout));
             } else {
-                layout->createBucket({}, featureIndex, renderData, firstLoad, showCollisionBoxes);
+                layout->createBucket({}, featureIndex, renderData, firstLoad, showCollisionBoxes, id.canonical);
             }
         } else {
             const Filter& filter = leaderImpl.filter;
@@ -379,11 +401,12 @@ void GeometryTileWorker::parse() {
             for (std::size_t i = 0; !obsolete && i < geometryLayer->featureCount(); i++) {
                 std::unique_ptr<GeometryTileFeature> feature = geometryLayer->getFeature(i);
 
-                if (!filter(expression::EvaluationContext { static_cast<float>(this->id.overscaledZ), feature.get() }))
+                if (!filter(expression::EvaluationContext(static_cast<float>(this->id.overscaledZ), feature.get())
+                                .withCanonicalTileID(&id.canonical)))
                     continue;
 
                 const GeometryCollection& geometries = feature->getGeometries();
-                bucket->addFeature(*feature, geometries, {}, PatternLayerMap(), i);
+                bucket->addFeature(*feature, geometries, {}, PatternLayerMap(), i, id.canonical);
                 featureIndex->insert(geometries, i, sourceLayerID, leaderImpl.id);
             }
 
@@ -438,15 +461,15 @@ void GeometryTileWorker::finalizeLayout() {
                 return;
             }
 
-            layout->prepareSymbols(glyphMap, glyphAtlas.positions,
-                                  imageMap, iconAtlas.iconPositions);
+            layout->prepareSymbols(glyphMap, glyphAtlas.positions, imageMap, iconAtlas.iconPositions);
 
             if (!layout->hasSymbolInstances()) {
                 continue;
             }
 
             // layout adds the bucket to buckets
-            layout->createBucket(iconAtlas.patternPositions, featureIndex, renderData, firstLoad, showCollisionBoxes);
+            layout->createBucket(
+                iconAtlas.patternPositions, featureIndex, renderData, firstLoad, showCollisionBoxes, id.canonical);
         }
     }
 

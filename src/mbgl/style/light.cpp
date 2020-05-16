@@ -12,15 +12,16 @@
 
 #include <mapbox/eternal.hpp>
 
+#include <utility>
+
 namespace mbgl {
 namespace style {
 
 static LightObserver nullObserver;
 
-Light::Light()
-    : impl(makeMutable<Impl>()),
-      observer(&nullObserver) {
-}
+Light::Light(Immutable<Light::Impl> impl_) : impl(std::move(impl_)), observer(&nullObserver) {}
+
+Light::Light() : Light(makeMutable<Impl>()) {}
 
 Light::~Light() = default;
 
@@ -189,7 +190,7 @@ PropertyValue<LightAnchorType> Light::getAnchor() const {
 
 void Light::setAnchor(PropertyValue<LightAnchorType> property) {
     auto impl_ = mutableImpl();
-    impl_->properties.template get<LightAnchor>().value = property;
+    impl_->properties.template get<LightAnchor>().value = std::move(property);
     impl = std::move(impl_);
     observer->onLightChanged(*this);
 }
@@ -215,7 +216,7 @@ PropertyValue<Color> Light::getColor() const {
 
 void Light::setColor(PropertyValue<Color> property) {
     auto impl_ = mutableImpl();
-    impl_->properties.template get<LightColor>().value = property;
+    impl_->properties.template get<LightColor>().value = std::move(property);
     impl = std::move(impl_);
     observer->onLightChanged(*this);
 }
@@ -241,7 +242,7 @@ PropertyValue<float> Light::getIntensity() const {
 
 void Light::setIntensity(PropertyValue<float> property) {
     auto impl_ = mutableImpl();
-    impl_->properties.template get<LightIntensity>().value = property;
+    impl_->properties.template get<LightIntensity>().value = std::move(property);
     impl = std::move(impl_);
     observer->onLightChanged(*this);
 }
@@ -267,7 +268,7 @@ PropertyValue<Position> Light::getPosition() const {
 
 void Light::setPosition(PropertyValue<Position> property) {
     auto impl_ = mutableImpl();
-    impl_->properties.template get<LightPosition>().value = property;
+    impl_->properties.template get<LightPosition>().value = std::move(property);
     impl = std::move(impl_);
     observer->onLightChanged(*this);
 }

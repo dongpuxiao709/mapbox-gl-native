@@ -1,6 +1,8 @@
 #pragma once
 
-#include <mapbox/weak.hpp>
+#include <mbgl/util/pass_types.hpp>
+
+#include <mapbox/std/weak.hpp>
 
 #include <functional>
 #include <memory>
@@ -50,6 +52,18 @@ public:
     // first invoked, the call is ignored.
     std::function<void()> bindOnce(std::function<void()>);
 
+    // Enqueues the given |task| for execution into this scheduler's task queue and
+    // then enqueues the |reply| with the captured task result to the current
+    // task queue.
+    //
+    // The |TaskFn| return type must be compatible with the |ReplyFn| argument type.
+    // Note: the task result is copied and passed by value.
+    template <typename TaskFn, typename ReplyFn>
+    void scheduleAndReplyValue(const TaskFn& task, const ReplyFn& reply) {
+        assert(GetCurrent());
+        scheduleAndReplyValue(task, reply, GetCurrent()->makeWeakPtr());
+    }
+
     // Set/Get the current Scheduler for this thread
     static Scheduler* GetCurrent();
     static void SetCurrent(Scheduler*);
@@ -57,7 +71,35 @@ public:
     // Get the scheduler for asynchronous tasks. This method
     // will lazily initialize a shared worker pool when ran
     // from the first time.
-    static std::shared_ptr<Scheduler> GetBackground();
+    // The scheduled tasks might run in parallel on different
+    // threads.
+    // TODO : Rename to GetPool()
+    static PassRefPtr<Scheduler> GetBackground();
+
+    // Get the *sequenced* scheduler for asynchronous tasks.
+    // Unlike the method above, the returned scheduler
+    // (once stored) represents a single thread, thus each
+    // newly scheduled task is guarantied to run after the
+    // previously scheduled one.
+    //
+    // Sequenced scheduler can be used for running tasks
+    // on the same thread-unsafe object.
+    static PassRefPtr<Scheduler> GetSequenced();
+
+protected:
+    template <typename TaskFn, typename ReplyFn>
+    void scheduleAndReplyValue(const TaskFn& task,
+                               const ReplyFn& reply,
+                               mapbox::base::WeakPtr<Scheduler> replyScheduler) {
+        auto scheduled = [replyScheduler = std::move(replyScheduler), task, reply] {
+            auto lock = replyScheduler.lock();
+            if (!replyScheduler) return;
+            auto scheduledReply = [reply, result = task()] { reply(result); };
+            replyScheduler->schedule(std::move(scheduledReply));
+        };
+
+        schedule(std::move(scheduled));
+    }
 };
 
 } // namespace mbgl

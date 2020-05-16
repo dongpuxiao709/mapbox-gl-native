@@ -1,24 +1,24 @@
-#include <mbgl/map/map.hpp>
-#include <mbgl/map/map_impl.hpp>
-#include <mbgl/map/camera.hpp>
-#include <mbgl/map/transform.hpp>
 #include <mbgl/annotation/annotation_manager.hpp>
 #include <mbgl/layermanager/layer_manager.hpp>
-#include <mbgl/style/style_impl.hpp>
-#include <mbgl/style/observer.hpp>
-#include <mbgl/renderer/update_parameters.hpp>
+#include <mbgl/map/camera.hpp>
+#include <mbgl/map/map.hpp>
+#include <mbgl/map/map_impl.hpp>
+#include <mbgl/map/transform.hpp>
+#include <mbgl/math/log2.hpp>
 #include <mbgl/renderer/renderer_frontend.hpp>
 #include <mbgl/renderer/renderer_observer.hpp>
-#include <mbgl/storage/file_source.hpp>
+#include <mbgl/renderer/update_parameters.hpp>
+#include <mbgl/storage/file_source_manager.hpp>
 #include <mbgl/storage/resource.hpp>
 #include <mbgl/storage/response.hpp>
+#include <mbgl/style/observer.hpp>
+#include <mbgl/style/style_impl.hpp>
 #include <mbgl/util/constants.hpp>
-#include <mbgl/util/math.hpp>
 #include <mbgl/util/exception.hpp>
-#include <mbgl/util/mapbox.hpp>
-#include <mbgl/util/tile_coordinate.hpp>
 #include <mbgl/util/logging.hpp>
-#include <mbgl/math/log2.hpp>
+#include <mbgl/util/mapbox.hpp>
+#include <mbgl/util/math.hpp>
+#include <mbgl/util/tile_coordinate.hpp>
 
 #include <utility>
 
@@ -30,9 +30,13 @@ Map::Map(RendererFrontend& frontend,
          MapObserver& observer,
          const MapOptions& mapOptions,
          const ResourceOptions& resourceOptions)
-    : impl(std::make_unique<Impl>(frontend, observer,
-                                  FileSource::getSharedFileSource(resourceOptions),
-                                  mapOptions)) {}
+    : impl(std::make_unique<Impl>(
+          frontend,
+          observer,
+          FileSourceManager::get()
+              ? std::shared_ptr<FileSource>(FileSourceManager::get()->getFileSource(ResourceLoader, resourceOptions))
+              : nullptr,
+          mapOptions)) {}
 
 Map::Map(std::unique_ptr<Impl> impl_) : impl(std::move(impl_)) {}
 
@@ -124,7 +128,7 @@ bool Map::isPanning() const {
 
 #pragma mark -
 
-CameraOptions Map::getCameraOptions(optional<EdgeInsets> padding) const {
+CameraOptions Map::getCameraOptions(const optional<EdgeInsets>& padding) const {
     return impl->transform.getCameraOptions(padding);
 }
 
@@ -154,7 +158,7 @@ void Map::pitchBy(double pitch, const AnimationOptions& animation) {
     easeTo(CameraOptions().withPitch((impl->transform.getPitch() * util::RAD2DEG) - pitch), animation);
 }
 
-void Map::scaleBy(double scale, optional<ScreenCoordinate> anchor, const AnimationOptions& animation) {
+void Map::scaleBy(double scale, const optional<ScreenCoordinate>& anchor, const AnimationOptions& animation) {
     const double zoom = impl->transform.getZoom() + impl->transform.getState().scaleZoom(scale);
     easeTo(CameraOptions().withZoom(zoom).withAnchor(anchor), animation);
 }
@@ -165,30 +169,36 @@ void Map::rotateBy(const ScreenCoordinate& first, const ScreenCoordinate& second
     impl->onUpdate();
 }
 
-CameraOptions Map::cameraForLatLngBounds(const LatLngBounds& bounds, const EdgeInsets& padding, optional<double> bearing, optional<double> pitch) const {
-    return cameraForLatLngs({
-        bounds.northwest(),
-        bounds.southwest(),
-        bounds.southeast(),
-        bounds.northeast(),
-    }, padding, bearing, pitch);
+CameraOptions Map::cameraForLatLngBounds(const LatLngBounds& bounds,
+                                         const EdgeInsets& padding,
+                                         const optional<double>& bearing,
+                                         const optional<double>& pitch) const {
+    return cameraForLatLngs(
+        {
+            bounds.northwest(),
+            bounds.southwest(),
+            bounds.southeast(),
+            bounds.northeast(),
+        },
+        padding,
+        bearing,
+        pitch);
 }
 
 CameraOptions cameraForLatLngs(const std::vector<LatLng>& latLngs, const Transform& transform, const EdgeInsets& padding) {
     if (latLngs.empty()) {
-        return CameraOptions();
+        return {};
     }
     Size size = transform.getState().getSize();
     // Calculate the bounds of the possibly rotated shape with respect to the viewport.
     ScreenCoordinate nePixel = {-INFINITY, -INFINITY};
     ScreenCoordinate swPixel = {INFINITY, INFINITY};
-    double viewportHeight = size.height;
     for (LatLng latLng : latLngs) {
         ScreenCoordinate pixel = transform.latLngToScreenCoordinate(latLng);
         swPixel.x = std::min(swPixel.x, pixel.x);
         nePixel.x = std::max(nePixel.x, pixel.x);
-        swPixel.y = std::min(swPixel.y, viewportHeight - pixel.y);
-        nePixel.y = std::max(nePixel.y, viewportHeight - pixel.y);
+        swPixel.y = std::min(swPixel.y, pixel.y);
+        nePixel.y = std::max(nePixel.y, pixel.y);
     }
     double width = nePixel.x - swPixel.x;
     double height = nePixel.y - swPixel.y;
@@ -212,25 +222,18 @@ CameraOptions cameraForLatLngs(const std::vector<LatLng>& latLngs, const Transfo
 
     // Calculate the center point of a virtual bounds that is extended in all directions by padding.
     ScreenCoordinate centerPixel = nePixel + swPixel;
-    ScreenCoordinate paddedNEPixel = {
-        padding.right() / minScale,
-        padding.top() / minScale,
-    };
-    ScreenCoordinate paddedSWPixel = {
-        padding.left() / minScale,
-        padding.bottom() / minScale,
-    };
-    centerPixel = centerPixel + paddedNEPixel - paddedSWPixel;
     centerPixel /= 2.0;
 
-    // CameraOptions origin is at the top-left corner.
-    centerPixel.y = viewportHeight - centerPixel.y;
-
-    return CameraOptions().withCenter(transform.screenCoordinateToLatLng(centerPixel)).withZoom(zoom);
+    return CameraOptions()
+        .withCenter(transform.screenCoordinateToLatLng(centerPixel))
+        .withPadding(padding)
+        .withZoom(zoom);
 }
 
-CameraOptions Map::cameraForLatLngs(const std::vector<LatLng>& latLngs, const EdgeInsets& padding, optional<double> bearing, optional<double> pitch) const {
-
+CameraOptions Map::cameraForLatLngs(const std::vector<LatLng>& latLngs,
+                                    const EdgeInsets& padding,
+                                    const optional<double>& bearing,
+                                    const optional<double>& pitch) const {
     if (!bearing && !pitch) {
         return mbgl::cameraForLatLngs(latLngs, impl->transform, padding);
     }
@@ -246,8 +249,10 @@ CameraOptions Map::cameraForLatLngs(const std::vector<LatLng>& latLngs, const Ed
         .withPitch(transform.getPitch() * util::RAD2DEG);
 }
 
-CameraOptions Map::cameraForGeometry(const Geometry<double>& geometry, const EdgeInsets& padding, optional<double> bearing, optional<double> pitch) const {
-
+CameraOptions Map::cameraForGeometry(const Geometry<double>& geometry,
+                                     const EdgeInsets& padding,
+                                     const optional<double>& bearing,
+                                     const optional<double>& pitch) const {
     std::vector<LatLng> latLngs;
     forEachPoint(geometry, [&](const Point<double>& pt) {
         latLngs.emplace_back(pt.y, pt.x);
@@ -264,6 +269,27 @@ LatLngBounds Map::latLngBoundsForCamera(const CameraOptions& camera) const {
         shallow.screenCoordinateToLatLng({}),
         shallow.screenCoordinateToLatLng({ double(size.width), double(size.height) })
     );
+}
+
+LatLngBounds Map::latLngBoundsForCameraUnwrapped(const CameraOptions& camera) const {
+    Transform shallow{impl->transform.getState()};
+    Size size = shallow.getState().getSize();
+
+    shallow.jumpTo(camera);
+    LatLng nw = shallow.screenCoordinateToLatLng({});
+    LatLng se = shallow.screenCoordinateToLatLng({double(size.width), double(size.height)});
+    LatLng ne = shallow.screenCoordinateToLatLng({double(size.width), 0.0});
+    LatLng sw = shallow.screenCoordinateToLatLng({0.0, double(size.height)});
+    LatLng center = shallow.screenCoordinateToLatLng({double(size.width) / 2, double(size.height) / 2});
+    nw.unwrapForShortestPath(center);
+    se.unwrapForShortestPath(center);
+    ne.unwrapForShortestPath(center);
+    sw.unwrapForShortestPath(center);
+    LatLngBounds bounds = LatLngBounds::hull(nw, se);
+    bounds.extend(ne);
+    bounds.extend(sw);
+    bounds.extend(center);
+    return bounds;
 }
 
 #pragma mark - Bounds
@@ -293,6 +319,22 @@ void Map::setBounds(const BoundOptions& options) {
         }
     }
 
+    if (options.maxPitch) {
+        impl->transform.setMaxPitch(*options.maxPitch);
+        if (impl->transform.getPitch() > impl->transform.getState().getMaxPitch()) {
+            changeCamera = true;
+            cameraOptions.withPitch(*options.maxPitch);
+        }
+    }
+
+    if (options.minPitch) {
+        impl->transform.setMinPitch(*options.minPitch);
+        if (impl->transform.getPitch() < impl->transform.getState().getMinPitch()) {
+            changeCamera = true;
+            cameraOptions.withPitch(*options.minPitch);
+        }
+    }
+
     if (changeCamera) {
         jumpTo(cameraOptions);
     }
@@ -302,7 +344,9 @@ BoundOptions Map::getBounds() const {
     return BoundOptions()
         .withLatLngBounds(impl->transform.getState().getLatLngBounds())
         .withMinZoom(impl->transform.getState().getMinZoom())
-        .withMaxZoom(impl->transform.getState().getMaxZoom());
+        .withMaxZoom(impl->transform.getState().getMaxZoom())
+        .withMinPitch(impl->transform.getState().getMinPitch() * util::RAD2DEG)
+        .withMaxPitch(impl->transform.getState().getMaxPitch() * util::RAD2DEG);
 }
 
 #pragma mark - Map options
@@ -364,6 +408,24 @@ LatLng Map::latLngForPixel(const ScreenCoordinate& pixel) const {
     return impl->transform.screenCoordinateToLatLng(pixel);
 }
 
+std::vector<ScreenCoordinate> Map::pixelsForLatLngs(const std::vector<LatLng>& latLngs) const {
+    std::vector<ScreenCoordinate> ret;
+    ret.reserve(latLngs.size());
+    for (const auto& latLng : latLngs) {
+        ret.emplace_back(pixelForLatLng(latLng));
+    }
+    return ret;
+}
+
+std::vector<LatLng> Map::latLngsForPixels(const std::vector<ScreenCoordinate>& screenCoords) const {
+    std::vector<LatLng> ret;
+    ret.reserve(screenCoords.size());
+    for (const auto& point : screenCoords) {
+        ret.emplace_back(latLngForPixel(point));
+    }
+    return ret;
+}
+
 #pragma mark - Annotations
 
 void Map::addAnnotationImage(std::unique_ptr<style::Image> image) {
@@ -416,30 +478,6 @@ void Map::setDebug(MapDebugOptions debugOptions) {
     impl->onUpdate();
 }
 
-void Map::cycleDebugOptions() {
-#if not MBGL_USE_GLES2
-    if (impl->debugOptions & MapDebugOptions::StencilClip)
-        impl->debugOptions = MapDebugOptions::NoDebug;
-    else if (impl->debugOptions & MapDebugOptions::Overdraw)
-        impl->debugOptions = MapDebugOptions::StencilClip;
-#else
-    if (impl->debugOptions & MapDebugOptions::Overdraw)
-        impl->debugOptions = MapDebugOptions::NoDebug;
-#endif // MBGL_USE_GLES2
-    else if (impl->debugOptions & MapDebugOptions::Collision)
-        impl->debugOptions = MapDebugOptions::Overdraw;
-    else if (impl->debugOptions & MapDebugOptions::Timestamps)
-        impl->debugOptions = impl->debugOptions | MapDebugOptions::Collision;
-    else if (impl->debugOptions & MapDebugOptions::ParseStatus)
-        impl->debugOptions = impl->debugOptions | MapDebugOptions::Timestamps;
-    else if (impl->debugOptions & MapDebugOptions::TileBorders)
-        impl->debugOptions = impl->debugOptions | MapDebugOptions::ParseStatus;
-    else
-        impl->debugOptions = MapDebugOptions::TileBorders;
-
-    impl->onUpdate();
-}
-
 MapDebugOptions Map::getDebug() const {
     return impl->debugOptions;
 }
@@ -460,6 +498,16 @@ void Map::dumpDebugLogs() const {
     Log::Info(Event::General, "--------------------------------------------------------------------------------");
     impl->style->impl->dumpDebugLogs();
     Log::Info(Event::General, "--------------------------------------------------------------------------------");
+}
+
+void Map::setFreeCameraOptions(const FreeCameraOptions& camera) {
+    impl->transform.setFreeCameraOptions(camera);
+    impl->cameraMutated = true;
+    impl->onUpdate();
+}
+
+FreeCameraOptions Map::getFreeCameraOptions() const {
+    return impl->transform.getFreeCameraOptions();
 }
 
 } // namespace mbgl

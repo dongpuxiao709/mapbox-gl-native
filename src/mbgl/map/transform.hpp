@@ -29,7 +29,7 @@ public:
 
     // Camera
     /** Returns the current camera options. */
-    CameraOptions getCameraOptions(optional<EdgeInsets>) const;
+    CameraOptions getCameraOptions(const optional<EdgeInsets>&) const;
 
     /** Instantaneously, synchronously applies the given camera options. */
     void jumpTo(const CameraOptions&);
@@ -58,6 +58,9 @@ public:
     void setLatLngBounds(LatLngBounds);
     void setMinZoom(double);
     void setMaxZoom(double);
+
+    void setMinPitch(double);
+    void setMaxPitch(double);
 
     // Zoom
 
@@ -110,13 +113,16 @@ public:
     ScreenCoordinate latLngToScreenCoordinate(const LatLng&) const;
     LatLng screenCoordinateToLatLng(const ScreenCoordinate&, LatLng::WrapMode = LatLng::Wrapped) const;
 
+    FreeCameraOptions getFreeCameraOptions() const;
+    void setFreeCameraOptions(const FreeCameraOptions& options);
+
 private:
     MapObserver& observer;
     TransformState state;
 
     void startTransition(const CameraOptions&,
                          const AnimationOptions&,
-                         std::function<void(double)>,
+                         const std::function<void(double)>&,
                          const Duration&);
 
     // We don't want to show horizon: limit max pitch based on edge insets.

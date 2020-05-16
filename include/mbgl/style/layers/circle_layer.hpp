@@ -7,7 +7,6 @@
 #include <mbgl/style/layer.hpp>
 #include <mbgl/style/filter.hpp>
 #include <mbgl/style/property_value.hpp>
-#include <mbgl/style/expression/formatted.hpp>
 #include <mbgl/util/color.hpp>
 
 namespace mbgl {
@@ -15,16 +14,16 @@ namespace style {
 
 class TransitionOptions;
 
-class CircleLayer : public Layer {
+class CircleLayer final : public Layer {
 public:
     CircleLayer(const std::string& layerID, const std::string& sourceID);
-    ~CircleLayer() final;
+    ~CircleLayer() override;
 
-    // Dynamic properties
-    optional<conversion::Error> setLayoutProperty(const std::string& name, const conversion::Convertible& value) final;
-    optional<conversion::Error> setPaintProperty(const std::string& name, const conversion::Convertible& value) final;
+    // Layout properties
 
-    StyleProperty getProperty(const std::string& name) const final;
+    static PropertyValue<float> getDefaultCircleSortKey();
+    const PropertyValue<float>& getCircleSortKey() const;
+    void setCircleSortKey(const PropertyValue<float>&);
 
     // Paint properties
 
@@ -104,6 +103,12 @@ public:
     std::unique_ptr<Layer> cloneRef(const std::string& id) const final;
 
 protected:
+    // Dynamic properties
+    optional<conversion::Error> setPropertyInternal(const std::string& name, const conversion::Convertible& value) final;
+
+    StyleProperty getProperty(const std::string& name) const final;
+    Value serialize() const final;
+
     Mutable<Layer::Impl> mutableBaseImpl() const final;
 };
 

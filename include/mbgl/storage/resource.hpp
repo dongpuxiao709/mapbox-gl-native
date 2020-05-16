@@ -33,6 +33,8 @@ public:
         Offline
     };
 
+    enum class StoragePolicy : bool { Permanent, Volatile };
+
     struct TileData {
         std::string urlTemplate;
         uint8_t pixelRatio;
@@ -64,7 +66,7 @@ public:
     void setPriority(Priority p) { priority = p; }
     void setUsage(Usage u) { usage = u; }
 
-    bool hasLoadingMethod(LoadingMethod method);
+    bool hasLoadingMethod(LoadingMethod method) const;
 
     static Resource style(const std::string& url);
     static Resource source(const std::string& url);
@@ -95,9 +97,11 @@ public:
     optional<Timestamp> priorExpires = {};
     optional<std::string> priorEtag = {};
     std::shared_ptr<const std::string> priorData;
+    Duration minimumUpdateInterval{Duration::zero()};
+    StoragePolicy storagePolicy{StoragePolicy::Permanent};
 };
 
-inline bool Resource::hasLoadingMethod(Resource::LoadingMethod method) {
+inline bool Resource::hasLoadingMethod(Resource::LoadingMethod method) const {
     return (loadingMethod & method);
 }
 

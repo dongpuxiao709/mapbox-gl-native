@@ -60,18 +60,28 @@ public:
     bool isPanning() const;
 
     // Camera
-    CameraOptions getCameraOptions(optional<EdgeInsets> = {}) const;
+    CameraOptions getCameraOptions(const optional<EdgeInsets>& = {}) const;
     void jumpTo(const CameraOptions&);
     void easeTo(const CameraOptions&, const AnimationOptions&);
     void flyTo(const CameraOptions&, const AnimationOptions&);
     void moveBy(const ScreenCoordinate&, const AnimationOptions& = {});
-    void scaleBy(double scale, optional<ScreenCoordinate> anchor, const AnimationOptions& animation = {});
+    void scaleBy(double scale, const optional<ScreenCoordinate>& anchor, const AnimationOptions& animation = {});
     void pitchBy(double pitch, const AnimationOptions& animation = {});
     void rotateBy(const ScreenCoordinate& first, const ScreenCoordinate& second, const AnimationOptions& = {});
-    CameraOptions cameraForLatLngBounds(const LatLngBounds&, const EdgeInsets&, optional<double> bearing = {}, optional<double> pitch = {}) const;
-    CameraOptions cameraForLatLngs(const std::vector<LatLng>&, const EdgeInsets&, optional<double> bearing = {}, optional<double> pitch = {}) const;
-    CameraOptions cameraForGeometry(const Geometry<double>&, const EdgeInsets&, optional<double> bearing = {}, optional<double> pitch = {}) const;
+    CameraOptions cameraForLatLngBounds(const LatLngBounds&,
+                                        const EdgeInsets&,
+                                        const optional<double>& bearing = {},
+                                        const optional<double>& pitch = {}) const;
+    CameraOptions cameraForLatLngs(const std::vector<LatLng>&,
+                                   const EdgeInsets&,
+                                   const optional<double>& bearing = {},
+                                   const optional<double>& pitch = {}) const;
+    CameraOptions cameraForGeometry(const Geometry<double>&,
+                                    const EdgeInsets&,
+                                    const optional<double>& bearing = {},
+                                    const optional<double>& pitch = {}) const;
     LatLngBounds latLngBoundsForCamera(const CameraOptions&) const;
+    LatLngBounds latLngBoundsForCameraUnwrapped(const CameraOptions&) const;
 
     /// @name Bounds
     /// @{
@@ -97,6 +107,8 @@ public:
     // Projection
     ScreenCoordinate pixelForLatLng(const LatLng&) const;
     LatLng latLngForPixel(const ScreenCoordinate&) const;
+    std::vector<ScreenCoordinate> pixelsForLatLngs(const std::vector<LatLng>&) const;
+    std::vector<LatLng> latLngsForPixels(const std::vector<ScreenCoordinate>&) const;
 
     // Annotations
     void addAnnotationImage(std::unique_ptr<style::Image>);
@@ -118,11 +130,18 @@ public:
 
     // Debug
     void setDebug(MapDebugOptions);
-    void cycleDebugOptions();
     MapDebugOptions getDebug() const;
 
     bool isFullyLoaded() const;
     void dumpDebugLogs() const;
+
+    // FreeCameraOptions provides more direct access to the underlying camera entity.
+    // For backwards compatibility the state set using this API must be representable with
+    // `CameraOptions` as well. Parameters are clamped to a valid range or discarded as invalid
+    // if the conversion to the pitch and bearing presentation is ambiguous. For example orientation
+    // can be invalid if it leads to the camera being upside down or the quaternion has zero length.
+    void setFreeCameraOptions(const FreeCameraOptions& camera);
+    FreeCameraOptions getFreeCameraOptions() const;
 
 protected:
     class Impl;

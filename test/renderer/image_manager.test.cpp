@@ -27,10 +27,10 @@ TEST(ImageManager, Basic) {
     auto images = parseSprite(util::read_file("test/fixtures/annotations/emerald.png"),
                               util::read_file("test/fixtures/annotations/emerald.json"));
     for (auto& image : images) {
-        imageManager.addImage(image->baseImpl);
-        auto* stored = imageManager.getImage(image->getID());
+        imageManager.addImage(image);
+        auto* stored = imageManager.getImage(image->id);
         ASSERT_TRUE(stored);
-        EXPECT_EQ(image->getImage().size, stored->image.size);
+        EXPECT_EQ(image->image.size, stored->image.size);
     }
 }
 
@@ -78,7 +78,7 @@ TEST(ImageManager, RemoveReleasesBinPackRect) {
 
 class StubImageRequestor : public ImageRequestor {
 public:
-    StubImageRequestor(ImageManager& imageManager) : ImageRequestor(imageManager) {}
+    StubImageRequestor(ImageManager& imageManager_) : ImageRequestor(imageManager_) {}
 
     void onImagesAvailable(ImageMap icons, ImageMap patterns, std::unordered_map<std::string, uint32_t> versionMap, uint64_t imageCorrelationID_) final {
         if (imagesAvailable && imageCorrelationID == imageCorrelationID_) imagesAvailable(icons, patterns, versionMap);
@@ -140,7 +140,7 @@ class StubImageManagerObserver : public ImageManagerObserver {
     public:
     int count = 0;
     std::function<void (const std::string&)> imageMissing = [](const std::string&){};
-    void onStyleImageMissing(const std::string& id, std::function<void()> done) override {
+    void onStyleImageMissing(const std::string& id, const std::function<void()>& done) override {
         count++;
         imageMissing(id);
         done();
@@ -187,20 +187,14 @@ TEST(ImageManager, OnStyleImageMissingBeforeSpriteLoaded) {
     EXPECT_EQ(observer.count, 1);
     ASSERT_TRUE(notified);
 
-    // Repeated request of the same image shall not result another
-    // `ImageManagerObserver.onStyleImageMissing()` call.
-    imageManager.getImages(requestor, std::make_pair(dependencies, ++imageCorrelationID));
-    runLoop.runOnce();
-
-    EXPECT_EQ(observer.count, 1);
-
     // Request for updated dependencies must be dispatched to the
     // observer.
     dependencies.emplace("post", ImageType::Icon);
     imageManager.getImages(requestor, std::make_pair(dependencies, ++imageCorrelationID));
-    runLoop.runOnce();
+    ASSERT_TRUE(requestor.hasPendingRequests());
 
-    EXPECT_EQ(observer.count, 2);
+    runLoop.runOnce();
+    ASSERT_FALSE(requestor.hasPendingRequests());
 
     // Another requestor shall not have pending requests for already obtained images.
     StubImageRequestor anotherRequestor(imageManager);

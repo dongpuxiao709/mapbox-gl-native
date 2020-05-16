@@ -2,6 +2,9 @@
 
 #include <mbgl/gfx/headless_frontend.hpp>
 #include <mbgl/map/map.hpp>
+#include <mbgl/storage/file_source.hpp>
+
+#include "manifest_parser.hpp"
 
 #include <memory>
 #include <string>
@@ -9,28 +12,60 @@
 class TestRunnerMapObserver;
 struct TestMetadata;
 
+class TestRunnerMapObserver : public mbgl::MapObserver {
+public:
+    TestRunnerMapObserver() = default;
+    void onDidFailLoadingMap(mbgl::MapLoadError, const std::string&) override { mapLoadFailure = true; }
+
+    void onDidFinishRenderingMap(RenderMode mode) override final {
+        if (!finishRenderingMap) finishRenderingMap = mode == RenderMode::Full;
+    }
+
+    void onDidBecomeIdle() override final { idle = true; }
+
+    void reset() {
+        mapLoadFailure = false;
+        finishRenderingMap = false;
+        idle = false;
+    }
+
+    bool mapLoadFailure;
+    bool finishRenderingMap;
+    bool idle;
+};
+
 class TestRunner {
 public:
-    TestRunner() = default;
-    explicit TestRunner(const std::string& testRootPath);
-    bool run(TestMetadata&);
+    enum class UpdateResults { NO, DEFAULT, PLATFORM, METRICS, REBASELINE };
+
+    TestRunner(Manifest, UpdateResults);
+    void run(TestMetadata&);
     void reset();
 
+    // Manifest
+    const Manifest& getManifest() const;
+    void doShuffle(uint32_t seed);
+
 private:
-    bool runOperations(const std::string& key, TestMetadata&);
-    bool checkQueryTestResults(mbgl::PremultipliedImage&& actualImage,
+    mbgl::HeadlessFrontend::RenderResult runTest(TestMetadata& metadata, TestContext& ctx);
+    void checkQueryTestResults(mbgl::PremultipliedImage&& actualImage,
                                std::vector<mbgl::Feature>&& features,
                                TestMetadata&);
-    bool checkRenderTestResults(mbgl::PremultipliedImage&& image, TestMetadata&);
+    void checkRenderTestResults(mbgl::PremultipliedImage&& image, TestMetadata&);
+    void checkProbingResults(TestMetadata&);
+    void appendLabelCutOffResults(TestMetadata&, const std::string&, const std::string&);
+    void registerProxyFileSource();
 
     struct Impl {
-        Impl(const TestMetadata&);
+        Impl(const TestMetadata&, const mbgl::ResourceOptions&);
         ~Impl();
 
         std::unique_ptr<TestRunnerMapObserver> observer;
         mbgl::HeadlessFrontend frontend;
+        std::shared_ptr<mbgl::FileSource> fileSource;
         mbgl::Map map;
     };
     std::unordered_map<std::string, std::unique_ptr<Impl>> maps;
-    std::string testRootPath{TEST_RUNNER_ROOT_PATH};
+    Manifest manifest;
+    UpdateResults updateResults;
 };

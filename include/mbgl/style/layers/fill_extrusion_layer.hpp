@@ -7,7 +7,6 @@
 #include <mbgl/style/layer.hpp>
 #include <mbgl/style/filter.hpp>
 #include <mbgl/style/property_value.hpp>
-#include <mbgl/style/expression/formatted.hpp>
 #include <mbgl/util/color.hpp>
 
 namespace mbgl {
@@ -15,16 +14,10 @@ namespace style {
 
 class TransitionOptions;
 
-class FillExtrusionLayer : public Layer {
+class FillExtrusionLayer final : public Layer {
 public:
     FillExtrusionLayer(const std::string& layerID, const std::string& sourceID);
-    ~FillExtrusionLayer() final;
-
-    // Dynamic properties
-    optional<conversion::Error> setLayoutProperty(const std::string& name, const conversion::Convertible& value) final;
-    optional<conversion::Error> setPaintProperty(const std::string& name, const conversion::Convertible& value) final;
-
-    StyleProperty getProperty(const std::string& name) const final;
+    ~FillExtrusionLayer() override;
 
     // Paint properties
 
@@ -52,9 +45,9 @@ public:
     void setFillExtrusionOpacityTransition(const TransitionOptions&);
     TransitionOptions getFillExtrusionOpacityTransition() const;
 
-    static PropertyValue<std::string> getDefaultFillExtrusionPattern();
-    const PropertyValue<std::string>& getFillExtrusionPattern() const;
-    void setFillExtrusionPattern(const PropertyValue<std::string>&);
+    static PropertyValue<expression::Image> getDefaultFillExtrusionPattern();
+    const PropertyValue<expression::Image>& getFillExtrusionPattern() const;
+    void setFillExtrusionPattern(const PropertyValue<expression::Image>&);
     void setFillExtrusionPatternTransition(const TransitionOptions&);
     TransitionOptions getFillExtrusionPatternTransition() const;
 
@@ -86,6 +79,12 @@ public:
     std::unique_ptr<Layer> cloneRef(const std::string& id) const final;
 
 protected:
+    // Dynamic properties
+    optional<conversion::Error> setPropertyInternal(const std::string& name, const conversion::Convertible& value) final;
+
+    StyleProperty getProperty(const std::string& name) const final;
+    Value serialize() const final;
+
     Mutable<Layer::Impl> mutableBaseImpl() const final;
 };
 

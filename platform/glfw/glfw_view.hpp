@@ -1,14 +1,21 @@
 #pragma once
 
 #include <mbgl/map/map.hpp>
+#include <mbgl/map/map_snapshotter.hpp>
 #include <mbgl/util/geometry.hpp>
 #include <mbgl/util/optional.hpp>
 #include <mbgl/util/run_loop.hpp>
 #include <mbgl/util/timer.hpp>
+#if defined(MBGL_RENDER_BACKEND_OPENGL) && !defined(MBGL_LAYER_CUSTOM_DISABLE_ALL)
+#include <mbgl/style/layers/location_indicator_layer.hpp>
+#endif
+
+#include <utility>
 
 struct GLFWwindow;
 class GLFWBackend;
 class GLFWRendererFrontend;
+class SnapshotObserver;
 
 namespace mbgl {
 namespace gfx {
@@ -18,7 +25,7 @@ class RendererBackend;
 
 class GLFWView : public mbgl::MapObserver {
 public:
-    GLFWView(bool fullscreen, bool benchmark);
+    GLFWView(bool fullscreen, bool benchmark, const mbgl::ResourceOptions &options);
     ~GLFWView() override;
 
     float getPixelRatio() const;
@@ -29,21 +36,17 @@ public:
 
     mbgl::gfx::RendererBackend& getRendererBackend();
 
+    void setTestDirectory(std::string dir) { testDirectory = std::move(dir); };
+
     // Callback called when the user presses the key mapped to style change.
     // The expected action is to set a new style, different to the current one.
     void setChangeStyleCallback(std::function<void()> callback);
 
-    void setPauseResumeCallback(std::function<void()> callback) {
-        pauseResumeCallback = callback;
-    };
+    void setPauseResumeCallback(std::function<void()> callback) { pauseResumeCallback = std::move(callback); };
 
-    void setOnlineStatusCallback(std::function<void()> callback) {
-        onlineStatusCallback = callback;
-    }
+    void setOnlineStatusCallback(std::function<void()> callback) { onlineStatusCallback = std::move(callback); }
 
-    void setResetCacheCallback(std::function<void()> callback) {
-        resetDatabaseCallback = callback;
-    };
+    void setResetCacheCallback(std::function<void()> callback) { resetDatabaseCallback = std::move(callback); };
 
     void setShouldClose();
 
@@ -57,6 +60,7 @@ public:
 
     // mbgl::MapObserver implementation
     void onDidFinishLoadingStyle() override;
+    void onWillStartRenderingFrame() override;
 
 protected:
     // mbgl::Backend implementation
@@ -85,11 +89,16 @@ private:
     void addRandomShapeAnnotations(int count);
     void addRandomCustomPointAnnotations(int count);
     void addAnimatedAnnotation();
+    void updateFreeCameraDemo();
     void updateAnimatedAnnotations();
     void toggleCustomSource();
+    void toggleLocationIndicatorLayer();
 
+    void cycleDebugOptions();
     void clearAnnotations();
     void popAnnotation();
+
+    void makeSnapshot(bool withOverlay = false);
 
     mbgl::AnnotationIDs annotationIDs;
     std::vector<std::string> spriteIDs;
@@ -104,6 +113,10 @@ private:
     GLFWRendererFrontend* rendererFrontend = nullptr;
     std::unique_ptr<GLFWBackend> backend;
 
+    std::string testDirectory = ".";
+
+    double freeCameraDemoPhase = -1;
+    mbgl::TimePoint freeCameraDemoStartTime;
     bool fullscreen = false;
     const bool benchmark = false;
     bool tracking = false;
@@ -136,4 +149,12 @@ private:
     GLFWwindow *window = nullptr;
     bool dirty = false;
     mbgl::optional<std::string> featureID;
+    std::unique_ptr<mbgl::MapSnapshotter> snapshotter;
+    std::unique_ptr<SnapshotObserver> snapshotterObserver;
+    mbgl::ResourceOptions mapResourceOptions;
+
+#if defined(MBGL_RENDER_BACKEND_OPENGL) && !defined(MBGL_LAYER_CUSTOM_DISABLE_ALL)
+    bool puckFollowsCameraCenter = false;
+    mbgl::style::LocationIndicatorLayer *puck = nullptr;
+#endif
 };

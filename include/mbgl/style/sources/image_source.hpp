@@ -12,7 +12,7 @@ namespace style {
 
 class ImageSource final : public Source {
 public:
-    ImageSource(std::string id, const std::array<LatLng, 4>);
+    ImageSource(std::string id, std::array<LatLng, 4>);
     ~ImageSource() override;
 
     optional<std::string> getURL() const;
@@ -33,6 +33,10 @@ public:
     mapbox::base::WeakPtr<Source> makeWeakPtr() override {
         return weakFactory.makeWeakPtr();
     }
+
+protected:
+    Mutable<Source::Impl> createMutable() const noexcept final;
+
 private:
     optional<std::string> url;
     std::unique_ptr<AsyncRequest> req;

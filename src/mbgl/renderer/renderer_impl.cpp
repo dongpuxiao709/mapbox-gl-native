@@ -24,15 +24,11 @@ static RendererObserver& nullObserver() {
     return observer;
 }
 
-Renderer::Impl::Impl(gfx::RendererBackend& backend_,
-                     float pixelRatio_,
-                     optional<std::string> localFontFamily_)
-    : orchestrator(!backend_.contextIsShared(), std::move(localFontFamily_))
-    , backend(backend_)
-    , observer(&nullObserver())
-    , pixelRatio(pixelRatio_) {
-
-}
+Renderer::Impl::Impl(gfx::RendererBackend& backend_, float pixelRatio_, const optional<std::string>& localFontFamily_)
+    : orchestrator(!backend_.contextIsShared(), localFontFamily_),
+      backend(backend_),
+      observer(&nullObserver()),
+      pixelRatio(pixelRatio_) {}
 
 Renderer::Impl::~Impl() {
     assert(gfx::BackendScope::exists());
@@ -112,8 +108,8 @@ void Renderer::Impl::render(const RenderTree& renderTree) {
         }
         parameters.staticData.depthRenderbuffer->setShouldClear(true);
 
-        uint32_t i = static_cast<uint32_t>(layerRenderItems.size()) - 1;
-        for (auto it = layerRenderItems.begin(); it != layerRenderItems.end(); ++it, --i) {
+        int32_t i = static_cast<int32_t>(layerRenderItems.size()) - 1;
+        for (auto it = layerRenderItems.begin(); it != layerRenderItems.end() && i >= 0; ++it, --i) {
             parameters.currentLayer = i;
             const RenderItem& renderItem = it->get();
             if (renderItem.hasRenderPass(parameters.pass)) {
@@ -163,8 +159,8 @@ void Renderer::Impl::render(const RenderTree& renderTree) {
         parameters.pass = RenderPass::Translucent;
         const auto debugGroup(parameters.renderPass->createDebugGroup("translucent"));
 
-        uint32_t i = static_cast<uint32_t>(layerRenderItems.size()) - 1;
-        for (auto it = layerRenderItems.begin(); it != layerRenderItems.end(); ++it, --i) {
+        int32_t i = static_cast<int32_t>(layerRenderItems.size()) - 1;
+        for (auto it = layerRenderItems.begin(); it != layerRenderItems.end() && i >= 0; ++it, --i) {
             parameters.currentLayer = i;
             const RenderItem& renderItem = it->get();
             if (renderItem.hasRenderPass(parameters.pass)) {

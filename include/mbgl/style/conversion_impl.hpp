@@ -2,15 +2,17 @@
 
 #include <mbgl/style/color_ramp_property_value.hpp>
 #include <mbgl/style/conversion.hpp>
+#include <mbgl/style/expression/image.hpp>
 #include <mbgl/style/layer.hpp>
 #include <mbgl/style/property_value.hpp>
+#include <mbgl/style/rotation.hpp>
 #include <mbgl/style/transition_options.hpp>
 #include <mbgl/util/feature.hpp>
 #include <mbgl/util/geojson.hpp>
 #include <mbgl/util/optional.hpp>
 #include <mbgl/util/traits.hpp>
 
-#include <mapbox/value.hpp>
+#include <mapbox/compatibility/value.hpp>
 
 #include <array>
 #include <chrono>
@@ -94,12 +96,13 @@ class ConversionTraits;
 class Convertible {
 public:
     template <typename T>
+    // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
     Convertible(T&& value) : vtable(vtableForType<std::decay_t<T>>()) {
         static_assert(sizeof(Storage) >= sizeof(std::decay_t<T>), "Storage must be large enough to hold value type");
         new (static_cast<void*>(&storage)) std::decay_t<T>(std::forward<T>(value));
     }
 
-    Convertible(Convertible&& v) : vtable(v.vtable) {
+    Convertible(Convertible&& v) noexcept : vtable(v.vtable) {
         // NOLINTNEXTLINE(performance-move-const-arg)
         vtable->move(std::move(v.storage), storage);
     }
@@ -108,7 +111,7 @@ public:
         vtable->destroy(storage);
     }
 
-    Convertible& operator=(Convertible&& v) {
+    Convertible& operator=(Convertible&& v) noexcept {
         if (this != &v) {
             vtable->destroy(storage);
             vtable = v.vtable;
@@ -305,19 +308,12 @@ struct ValueFactory<ColorRampPropertyValue> {
 
 template <>
 struct ValueFactory<TransitionOptions> {
-    static Value make(const TransitionOptions& value) {
-        return mapbox::base::ValueArray{
-            {std::chrono::duration_cast<std::chrono::milliseconds>(value.duration.value_or(mbgl::Duration::zero()))
-                 .count(),
-             std::chrono::duration_cast<std::chrono::milliseconds>(value.delay.value_or(mbgl::Duration::zero()))
-                 .count(),
-             value.enablePlacementTransitions}};
-    }
+    static Value make(const TransitionOptions& value) { return value.serialize(); }
 };
 
 template <>
 struct ValueFactory<Color> {
-    static Value make(const Color& color) { return color.toObject(); }
+    static Value make(const Color& color) { return color.serialize(); }
 };
 
 template <typename T>
@@ -349,6 +345,11 @@ struct ValueFactory<Position> {
     }
 };
 
+template <>
+struct ValueFactory<Rotation> {
+    static Value make(const Rotation& rotation) { return {rotation.getAngle()}; }
+};
+
 template <typename T>
 Value makeValue(T&& arg) {
     return ValueFactory<std::decay_t<T>>::make(std::forward<T>(arg));
@@ -357,19 +358,24 @@ Value makeValue(T&& arg) {
 template <typename T>
 StyleProperty makeStyleProperty(const PropertyValue<T>& value) {
     return value.match([](const Undefined&) -> StyleProperty { return {}; },
-                       [](const T& t) -> StyleProperty {
-                           return {makeValue(t), StyleProperty::Kind::Constant};
+                       [](const Color& c) -> StyleProperty {
+                           return {makeValue(c), StyleProperty::Kind::Expression};
                        },
                        [](const PropertyExpression<T>& fn) -> StyleProperty {
                            return {fn.getExpression().serialize(), StyleProperty::Kind::Expression};
+                       },
+                       [](const auto& t) -> StyleProperty {
+                           return {makeValue(t), StyleProperty::Kind::Constant};
                        });
 }
 
 inline StyleProperty makeStyleProperty(const TransitionOptions& value) {
+    if (!value.isDefined()) return {};
     return {makeValue(value), StyleProperty::Kind::Transition};
 }
 
 inline StyleProperty makeStyleProperty(const ColorRampPropertyValue& value) {
+    if (value.isUndefined()) return {};
     return {makeValue(value), StyleProperty::Kind::Expression};
 }
 

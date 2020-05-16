@@ -7,7 +7,6 @@
 #include <mbgl/style/layer.hpp>
 #include <mbgl/style/filter.hpp>
 #include <mbgl/style/property_value.hpp>
-#include <mbgl/style/expression/formatted.hpp>
 #include <mbgl/util/color.hpp>
 
 namespace mbgl {
@@ -15,16 +14,16 @@ namespace style {
 
 class TransitionOptions;
 
-class FillLayer : public Layer {
+class FillLayer final : public Layer {
 public:
     FillLayer(const std::string& layerID, const std::string& sourceID);
-    ~FillLayer() final;
+    ~FillLayer() override;
 
-    // Dynamic properties
-    optional<conversion::Error> setLayoutProperty(const std::string& name, const conversion::Convertible& value) final;
-    optional<conversion::Error> setPaintProperty(const std::string& name, const conversion::Convertible& value) final;
+    // Layout properties
 
-    StyleProperty getProperty(const std::string& name) const final;
+    static PropertyValue<float> getDefaultFillSortKey();
+    const PropertyValue<float>& getFillSortKey() const;
+    void setFillSortKey(const PropertyValue<float>&);
 
     // Paint properties
 
@@ -52,9 +51,9 @@ public:
     void setFillOutlineColorTransition(const TransitionOptions&);
     TransitionOptions getFillOutlineColorTransition() const;
 
-    static PropertyValue<std::string> getDefaultFillPattern();
-    const PropertyValue<std::string>& getFillPattern() const;
-    void setFillPattern(const PropertyValue<std::string>&);
+    static PropertyValue<expression::Image> getDefaultFillPattern();
+    const PropertyValue<expression::Image>& getFillPattern() const;
+    void setFillPattern(const PropertyValue<expression::Image>&);
     void setFillPatternTransition(const TransitionOptions&);
     TransitionOptions getFillPatternTransition() const;
 
@@ -80,6 +79,12 @@ public:
     std::unique_ptr<Layer> cloneRef(const std::string& id) const final;
 
 protected:
+    // Dynamic properties
+    optional<conversion::Error> setPropertyInternal(const std::string& name, const conversion::Convertible& value) final;
+
+    StyleProperty getProperty(const std::string& name) const final;
+    Value serialize() const final;
+
     Mutable<Layer::Impl> mutableBaseImpl() const final;
 };
 

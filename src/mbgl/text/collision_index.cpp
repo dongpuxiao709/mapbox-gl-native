@@ -16,26 +16,44 @@
 
 namespace mbgl {
 
+namespace {
 // When a symbol crosses the edge that causes it to be included in
 // collision detection, it will cause changes in the symbols around
 // it. This constant specifies how many pixels to pad the edge of
 // the viewport for collision detection so that the bulk of the changes
 // occur offscreen. Making this constant greater increases label
 // stability, but it's expensive.
-static const float viewportPadding = 100;
+const float viewportPaddingDefault = 100;
+// Viewport padding must be much larger for static tiles to avoid clipped labels.
+const float viewportPaddingForStaticTiles = 1024;
 
-CollisionIndex::CollisionIndex(const TransformState& transformState_)
-    : transformState(transformState_)
-    , collisionGrid(transformState.getSize().width + 2 * viewportPadding, transformState.getSize().height + 2 * viewportPadding, 25)
-    , ignoredGrid(transformState.getSize().width + 2 * viewportPadding, transformState.getSize().height + 2 * viewportPadding, 25)
-    , screenRightBoundary(transformState.getSize().width + viewportPadding)
-    , screenBottomBoundary(transformState.getSize().height + viewportPadding)
-    , gridRightBoundary(transformState.getSize().width + 2 * viewportPadding)
-    , gridBottomBoundary(transformState.getSize().height + 2 * viewportPadding)
-    , pitchFactor(std::cos(transformState.getPitch()) * transformState.getCameraToCenterDistance())
-{}
+inline float findViewportPadding(const TransformState& transformState, MapMode mapMode) {
+    if (mapMode == MapMode::Tile) return viewportPaddingForStaticTiles;
+    return (transformState.getPitch() != 0.0f) ? viewportPaddingDefault * 2 : viewportPaddingDefault;
+}
 
-float CollisionIndex::approximateTileDistance(const TileDistance& tileDistance, const float lastSegmentAngle, const float pixelsToTileUnits, const float cameraToAnchorDistance, const bool pitchWithMap) {
+} // namespace
+
+CollisionIndex::CollisionIndex(const TransformState& transformState_, MapMode mapMode)
+    : transformState(transformState_),
+      viewportPadding(findViewportPadding(transformState_, mapMode)),
+      collisionGrid(transformState.getSize().width + 2 * viewportPadding,
+                    transformState.getSize().height + 2 * viewportPadding,
+                    25),
+      ignoredGrid(transformState.getSize().width + 2 * viewportPadding,
+                  transformState.getSize().height + 2 * viewportPadding,
+                  25),
+      screenRightBoundary(transformState.getSize().width + viewportPadding),
+      screenBottomBoundary(transformState.getSize().height + viewportPadding),
+      gridRightBoundary(transformState.getSize().width + 2 * viewportPadding),
+      gridBottomBoundary(transformState.getSize().height + 2 * viewportPadding),
+      pitchFactor(std::cos(transformState.getPitch()) * transformState.getCameraToCenterDistance()) {}
+
+float CollisionIndex::approximateTileDistance(const TileDistance& tileDistance,
+                                              const float lastSegmentAngle,
+                                              const float pixelsToTileUnits,
+                                              const float cameraToAnchorDistance,
+                                              const bool pitchWithMap) {
     // This is a quick and dirty solution for chosing which collision circles to use (since collision circles are
     // laid out in tile units). Ideally, I think we should generate collision circles on the fly in viewport coordinates
     // at the time we do collision detection.
@@ -55,80 +73,121 @@ float CollisionIndex::approximateTileDistance(const TileDistance& tileDistance, 
         (incidenceStretch - 1) * lastSegmentTile * std::abs(std::sin(lastSegmentAngle));
 }
 
-bool CollisionIndex::isOffscreen(float x1, float y1, float x2, float y2) const {
-    return x2 < viewportPadding || x1 >= screenRightBoundary || y2 < viewportPadding || y1 >= screenBottomBoundary;
+bool CollisionIndex::isOffscreen(const CollisionBoundaries& boundaries) const {
+    return boundaries[2] < viewportPadding || boundaries[0] >= screenRightBoundary || boundaries[3] < viewportPadding ||
+           boundaries[1] >= screenBottomBoundary;
 }
 
-bool CollisionIndex::isInsideGrid(float x1, float y1, float x2, float y2) const {
-    return x2 >= 0 && x1 < gridRightBoundary && y2 >= 0 && y1 < gridBottomBoundary;
+bool CollisionIndex::isInsideGrid(const CollisionBoundaries& boundaries) const {
+    return boundaries[2] >= 0 && boundaries[0] < gridRightBoundary && boundaries[3] >= 0 &&
+           boundaries[1] < gridBottomBoundary;
 }
-    
-CollisionTileBoundaries CollisionIndex::projectTileBoundaries(const mat4& posMatrix) const {
+
+CollisionBoundaries CollisionIndex::projectTileBoundaries(const mat4& posMatrix) const {
     Point<float> topLeft = projectPoint(posMatrix, { 0, 0 });
     Point<float> bottomRight = projectPoint(posMatrix, { util::EXTENT, util::EXTENT });
 
     return {{ topLeft.x, topLeft.y, bottomRight.x, bottomRight.y }};
-    
 }
 
-bool CollisionIndex::isInsideTile(float x1, float y1, float x2, float y2, const CollisionTileBoundaries& tileBoundaries) const {
-    // This check is only well defined when the tile boundaries are axis-aligned
-    // We are relying on it only being used in MapMode::Tile, where that is always the case
-
-    return x1 >= tileBoundaries[0] && y1 >= tileBoundaries[1] && x2 < tileBoundaries[2] && y2 < tileBoundaries[3];
+// The tile border checks below are only well defined when the tile boundaries are axis-aligned
+// We are relying on it only being used in MapMode::Tile, where that is always the case
+inline bool CollisionIndex::isInsideTile(const CollisionBoundaries& boundaries,
+                                         const CollisionBoundaries& tileBoundaries) const {
+    return boundaries[0] >= tileBoundaries[0] && boundaries[1] >= tileBoundaries[1] &&
+           boundaries[2] < tileBoundaries[2] && boundaries[3] < tileBoundaries[3];
 }
 
+inline bool CollisionIndex::overlapsTile(const CollisionBoundaries& boundaries,
+                                         const CollisionBoundaries& tileBoundaries) const {
+    return boundaries[0] < tileBoundaries[2] && boundaries[2] > tileBoundaries[0] &&
+           boundaries[1] < tileBoundaries[3] && boundaries[3] > tileBoundaries[1];
+}
 
-std::pair<bool,bool> CollisionIndex::placeFeature(const CollisionFeature& feature,
-                                      Point<float> shift,
-                                      const mat4& posMatrix,
-                                      const mat4& labelPlaneMatrix,
-                                      const float textPixelRatio,
-                                      const PlacedSymbol& symbol,
-                                      const float scale,
-                                      const float fontSize,
-                                      const bool allowOverlap,
-                                      const bool pitchWithMap,
-                                      const bool collisionDebug,
-                                      const optional<CollisionTileBoundaries>& avoidEdges,
-                                      const optional<std::function<bool(const IndexedSubfeature&)>> collisionGroupPredicate,
-                                      std::vector<ProjectedCollisionBox>& projectedBoxes) {
+IntersectStatus CollisionIndex::intersectsTileEdges(const CollisionBox& box,
+                                                    Point<float> shift,
+                                                    const mat4& posMatrix,
+                                                    const float textPixelRatio,
+                                                    const CollisionBoundaries& tileEdges) const {
+    auto boundaries = getProjectedCollisionBoundaries(posMatrix, shift, textPixelRatio, box);
+    IntersectStatus result;
+    const float x1 = boundaries[0];
+    const float y1 = boundaries[1];
+    const float x2 = boundaries[2];
+    const float y2 = boundaries[3];
+
+    const float tileX1 = tileEdges[0];
+    const float tileY1 = tileEdges[1];
+    const float tileX2 = tileEdges[2];
+    const float tileY2 = tileEdges[3];
+
+    // Check left border
+    int minSectionLength = std::min(tileX1 - x1, x2 - tileX1);
+    if (minSectionLength <= 0) { // Check right border
+        minSectionLength = std::min(tileX2 - x1, x2 - tileX2);
+    }
+    if (minSectionLength > 0) {
+        result.flags |= IntersectStatus::VerticalBorders;
+        result.minSectionLength = minSectionLength;
+    }
+    // Check top border
+    minSectionLength = std::min(tileY1 - y1, y2 - tileY1);
+    if (minSectionLength <= 0) { // Check bottom border
+        minSectionLength = std::min(tileY2 - y1, y2 - tileY2);
+    }
+    if (minSectionLength > 0) {
+        result.flags |= IntersectStatus::HorizontalBorders;
+        result.minSectionLength = std::min(result.minSectionLength, minSectionLength);
+    }
+    return result;
+}
+
+std::pair<bool, bool> CollisionIndex::placeFeature(
+    const CollisionFeature& feature,
+    Point<float> shift,
+    const mat4& posMatrix,
+    const mat4& labelPlaneMatrix,
+    const float textPixelRatio,
+    const PlacedSymbol& symbol,
+    const float scale,
+    const float fontSize,
+    const bool allowOverlap,
+    const bool pitchWithMap,
+    const bool collisionDebug,
+    const optional<CollisionBoundaries>& avoidEdges,
+    const optional<std::function<bool(const IndexedSubfeature&)>>& collisionGroupPredicate,
+    std::vector<ProjectedCollisionBox>& projectedBoxes) {
     assert(projectedBoxes.empty());
     if (!feature.alongLine) {
         const CollisionBox& box = feature.boxes.front();
-        const auto projectedPoint = projectAndGetPerspectiveRatio(posMatrix, box.anchor);
-        const float tileToViewport = textPixelRatio * projectedPoint.second;
-        float px1 = (box.x1 + shift.x) * tileToViewport + projectedPoint.first.x;
-        float py1 = (box.y1 + shift.y) * tileToViewport + projectedPoint.first.y;
-        float px2 = (box.x2 + shift.x) * tileToViewport + projectedPoint.first.x;
-        float py2 = (box.y2 + shift.y) * tileToViewport + projectedPoint.first.y;
-        projectedBoxes.emplace_back(px1, py1, px2, py2);
-
-        if ((avoidEdges && !isInsideTile(px1, py1, px2, py2, *avoidEdges)) ||
-            !isInsideGrid(px1, py1, px2, py2) ||
+        auto collisionBoundaries = getProjectedCollisionBoundaries(posMatrix, shift, textPixelRatio, box);
+        projectedBoxes.emplace_back(
+            collisionBoundaries[0], collisionBoundaries[1], collisionBoundaries[2], collisionBoundaries[3]);
+        if ((avoidEdges && !isInsideTile(collisionBoundaries, *avoidEdges)) || !isInsideGrid(collisionBoundaries) ||
             (!allowOverlap && collisionGrid.hitTest(projectedBoxes.back().box(), collisionGroupPredicate))) {
             return { false, false };
         }
 
-        return {true, isOffscreen(px1, py1, px2, py2)};
+        return {true, isOffscreen(collisionBoundaries)};
     } else {
         return placeLineFeature(feature, posMatrix, labelPlaneMatrix, textPixelRatio, symbol, scale, fontSize, allowOverlap, pitchWithMap, collisionDebug, avoidEdges, collisionGroupPredicate, projectedBoxes);
     }
 }
 
-std::pair<bool,bool> CollisionIndex::placeLineFeature(const CollisionFeature& feature,
-                                      const mat4& posMatrix,
-                                      const mat4& labelPlaneMatrix,
-                                      const float textPixelRatio,
-                                      const PlacedSymbol& symbol,
-                                      const float scale,
-                                      const float fontSize,
-                                      const bool allowOverlap,
-                                      const bool pitchWithMap,
-                                      const bool collisionDebug,
-                                      const optional<CollisionTileBoundaries>& avoidEdges,
-                                      const optional<std::function<bool(const IndexedSubfeature&)>> collisionGroupPredicate,
-                                      std::vector<ProjectedCollisionBox>& projectedBoxes) {
+std::pair<bool, bool> CollisionIndex::placeLineFeature(
+    const CollisionFeature& feature,
+    const mat4& posMatrix,
+    const mat4& labelPlaneMatrix,
+    const float textPixelRatio,
+    const PlacedSymbol& symbol,
+    const float scale,
+    const float fontSize,
+    const bool allowOverlap,
+    const bool pitchWithMap,
+    const bool collisionDebug,
+    const optional<CollisionBoundaries>& avoidEdges,
+    const optional<std::function<bool(const IndexedSubfeature&)>>& collisionGroupPredicate,
+    std::vector<ProjectedCollisionBox>& projectedBoxes) {
     assert(feature.alongLine);
     assert(projectedBoxes.empty());
     const auto tileUnitAnchorPoint = symbol.anchorPoint;
@@ -161,7 +220,8 @@ std::pair<bool,bool> CollisionIndex::placeLineFeature(const CollisionFeature& fe
     // equivalent to pixel_to_tile_units
     const auto pixelsToTileUnits = 1 / (textPixelRatio * scale);
 
-    float firstTileDistance = 0, lastTileDistance = 0;
+    float firstTileDistance = 0.f;
+    float lastTileDistance = 0.f;
     if (firstAndLastGlyph) {
         firstTileDistance = approximateTileDistance(*(firstAndLastGlyph->first.tileDistance), firstAndLastGlyph->first.angle, pixelsToTileUnits, projectedAnchor.second, pitchWithMap);
         lastTileDistance = approximateTileDistance(*(firstAndLastGlyph->second.tileDistance), firstAndLastGlyph->second.angle, pixelsToTileUnits, projectedAnchor.second, pitchWithMap);
@@ -217,17 +277,18 @@ std::pair<bool,bool> CollisionIndex::placeLineFeature(const CollisionFeature& fe
         }
 
         previousCirclePlaced = true;
-        float px1 = projectedPoint.x - radius;
-        float px2 = projectedPoint.x + radius;
-        float py1 = projectedPoint.y - radius;
-        float py2 = projectedPoint.y + radius;
+
+        CollisionBoundaries collisionBoundaries{{projectedPoint.x - radius,
+                                                 projectedPoint.y - radius,
+                                                 projectedPoint.x + radius,
+                                                 projectedPoint.y + radius}};
 
         projectedBoxes[i] = ProjectedCollisionBox{projectedPoint.x, projectedPoint.y, radius};
-        
-        entirelyOffscreen &= isOffscreen(px1, py1, px2, py2);
-        inGrid |= isInsideGrid(px1, py1, px2, py2);
 
-        if ((avoidEdges && !isInsideTile(px1, py1, px2, py2, *avoidEdges)) ||
+        entirelyOffscreen &= isOffscreen(collisionBoundaries);
+        inGrid |= isInsideGrid(collisionBoundaries);
+
+        if ((avoidEdges && !isInsideTile(collisionBoundaries, *avoidEdges)) ||
             (!allowOverlap && collisionGrid.hitTest(projectedBoxes[i].circle(), collisionGroupPredicate))) {
             if (!collisionDebug) {
                 return {false, false};
@@ -241,7 +302,6 @@ std::pair<bool,bool> CollisionIndex::placeLineFeature(const CollisionFeature& fe
 
     return {!collisionDetected && firstAndLastGlyph && inGrid, entirelyOffscreen};
 }
-
 
 void CollisionIndex::insertFeature(const CollisionFeature& feature, const std::vector<ProjectedCollisionBox>& projectedBoxes, bool ignorePlacement, uint32_t bucketInstanceId, uint16_t collisionGroupId) {
     if (feature.alongLine) {
@@ -262,7 +322,7 @@ void CollisionIndex::insertFeature(const CollisionFeature& feature, const std::v
                 );
             }
         }
-    } else {
+    } else if (!projectedBoxes.empty()) {
         assert(projectedBoxes.size() == 1);
         auto& box = projectedBoxes[0];
         assert(box.isBox());
@@ -372,6 +432,20 @@ Point<float> CollisionIndex::projectPoint(const mat4& posMatrix, const Point<flo
     return Point<float> {
         static_cast<float>((((p[0] / p[3] + 1) / 2) * size.width) + viewportPadding),
         static_cast<float>((((-p[1] / p[3] + 1) / 2) * size.height) + viewportPadding) };
+}
+
+CollisionBoundaries CollisionIndex::getProjectedCollisionBoundaries(const mat4& posMatrix,
+                                                                    Point<float> shift,
+                                                                    float textPixelRatio,
+                                                                    const CollisionBox& box) const {
+    const auto projectedPoint = projectAndGetPerspectiveRatio(posMatrix, box.anchor);
+    const float tileToViewport = textPixelRatio * projectedPoint.second;
+    return CollisionBoundaries{{
+        (box.x1 + shift.x) * tileToViewport + projectedPoint.first.x,
+        (box.y1 + shift.y) * tileToViewport + projectedPoint.first.y,
+        (box.x2 + shift.x) * tileToViewport + projectedPoint.first.x,
+        (box.y2 + shift.y) * tileToViewport + projectedPoint.first.y,
+    }};
 }
 
 } // namespace mbgl

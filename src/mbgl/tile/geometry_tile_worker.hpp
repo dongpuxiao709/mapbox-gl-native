@@ -33,17 +33,25 @@ public:
                        OverscaledTileID,
                        std::string,
                        const std::atomic<bool>&,
-                       const MapMode,
-                       const float pixelRatio,
-                       const bool showCollisionBoxes_);
+                       MapMode,
+                       float pixelRatio,
+                       bool showCollisionBoxes_);
     ~GeometryTileWorker();
 
-    void setLayers(std::vector<Immutable<style::LayerProperties>>, uint64_t correlationID);
-    void setData(std::unique_ptr<const GeometryTileData>, bool resetLayers, uint64_t correlationID);
+    void setLayers(std::vector<Immutable<style::LayerProperties>>,
+                   std::set<std::string> availableImages,
+                   uint64_t correlationID);
+    void setData(std::unique_ptr<const GeometryTileData>,
+                 std::set<std::string> availableImages,
+                 uint64_t correlationID);
+    void reset(uint64_t correlationID_);
     void setShowCollisionBoxes(bool showCollisionBoxes_, uint64_t correlationID_);
-    
-    void onGlyphsAvailable(GlyphMap glyphs);
-    void onImagesAvailable(ImageMap icons, ImageMap patterns, ImageVersionMap versionMap, uint64_t imageCorrelationID);
+
+    void onGlyphsAvailable(GlyphMap newGlyphMap);
+    void onImagesAvailable(ImageMap newIconMap,
+                           ImageMap newPatternMap,
+                           ImageVersionMap versionMap,
+                           uint64_t imageCorrelationID);
 
 private:
     void coalesced();
@@ -96,7 +104,8 @@ private:
     ImageMap imageMap;
     ImageMap patternMap;
     ImageVersionMap versionMap;
-    
+    std::set<std::string> availableImages;
+
     bool showCollisionBoxes;
     bool firstLoad = true;
 };

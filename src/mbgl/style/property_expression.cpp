@@ -8,6 +8,7 @@ PropertyExpressionBase::PropertyExpressionBase(std::unique_ptr<expression::Expre
       zoomCurve(expression::findZoomCurveChecked(expression.get())) {
     isZoomConstant_ = expression::isZoomConstant(*expression);
     isFeatureConstant_ = expression::isFeatureConstant(*expression);
+    isRuntimeConstant_ = expression::isRuntimeConstant(*expression);
 }
 
 bool PropertyExpressionBase::isZoomConstant() const noexcept {
@@ -18,19 +19,8 @@ bool PropertyExpressionBase::isFeatureConstant() const noexcept {
     return isFeatureConstant_;
 }
 
-bool PropertyExpressionBase::canEvaluateWith(const expression::EvaluationContext& context) const noexcept {
-    if (context.zoom) {
-        if (context.feature != nullptr) {
-            return !isFeatureConstant();
-        }
-        return !isZoomConstant() && isFeatureConstant();
-    }
-
-    if (context.feature != nullptr) {
-        return isZoomConstant() && !isFeatureConstant();
-    }
-
-    return true;
+bool PropertyExpressionBase::isRuntimeConstant() const noexcept {
+    return isRuntimeConstant_;
 }
 
 float PropertyExpressionBase::interpolationFactor(const Range<float>& inputLevels, const float inputValue) const noexcept {
@@ -50,18 +40,19 @@ float PropertyExpressionBase::interpolationFactor(const Range<float>& inputLevel
 
 Range<float> PropertyExpressionBase::getCoveringStops(const float lower, const float upper) const noexcept {
     return zoomCurve.match(
-        [](std::nullptr_t) {
+        [](std::nullptr_t) -> Range<float> {
             assert(false);
-            return Range<float>(0.0f, 0.0f);
+            return {0.0f, 0.0f};
         },
-        [&](auto z) {
-            return z->getCoveringStops(lower, upper);
-        }
-    );
+        [&](auto z) { return z->getCoveringStops(lower, upper); });
 }
 
 const expression::Expression& PropertyExpressionBase::getExpression() const noexcept {
     return *expression;
+}
+
+std::shared_ptr<const expression::Expression> PropertyExpressionBase::getSharedExpression() const noexcept {
+    return expression;
 }
 
 } // namespace style

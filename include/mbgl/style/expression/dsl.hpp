@@ -29,13 +29,13 @@ std::unique_ptr<Expression> createExpression(const mbgl::style::conversion::Conv
 std::unique_ptr<Expression> error(std::string);
 
 std::unique_ptr<Expression> literal(const char* value);
-std::unique_ptr<Expression> literal(Value value);
+std::unique_ptr<Expression> literal(const Value& value);
 std::unique_ptr<Expression> literal(std::initializer_list<double> value);
 std::unique_ptr<Expression> literal(std::initializer_list<const char*> value);
 
-std::unique_ptr<Expression>
-assertion(type::Type, std::unique_ptr<Expression>, 
-          std::unique_ptr<Expression> def = nullptr);
+std::unique_ptr<Expression> assertion(const type::Type&,
+                                      std::unique_ptr<Expression>,
+                                      std::unique_ptr<Expression> def = nullptr);
 std::unique_ptr<Expression> number(std::unique_ptr<Expression>,
                                    std::unique_ptr<Expression> def = nullptr);
 std::unique_ptr<Expression> string(std::unique_ptr<Expression>,
@@ -49,6 +49,7 @@ std::unique_ptr<Expression> toString(std::unique_ptr<Expression>,
                                      std::unique_ptr<Expression> def = nullptr);
 std::unique_ptr<Expression> toFormatted(std::unique_ptr<Expression>,
                                         std::unique_ptr<Expression> def = nullptr);
+std::unique_ptr<Expression> toImage(std::unique_ptr<Expression>, std::unique_ptr<Expression> def = nullptr);
 
 std::unique_ptr<Expression> get(const char* value);
 std::unique_ptr<Expression> get(std::unique_ptr<Expression>);
@@ -88,6 +89,9 @@ std::unique_ptr<Expression> concat(std::vector<std::unique_ptr<Expression>> inpu
 
 std::unique_ptr<Expression> format(const char* value);
 std::unique_ptr<Expression> format(std::unique_ptr<Expression>);
+
+std::unique_ptr<Expression> image(const char* value);
+std::unique_ptr<Expression> image(std::unique_ptr<Expression>);
 
 } // namespace dsl
 } // namespace expression

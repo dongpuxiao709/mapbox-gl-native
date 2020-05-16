@@ -29,6 +29,14 @@ bool isFeatureConstant(const Expression& expression) {
         return false;
     }
 
+    if (expression.getKind() == Kind::Within) {
+        return false;
+    }
+
+    if (expression.getKind() == Kind::Distance) {
+        return false;
+    }
+
     if (expression.getKind() == Kind::CollatorExpression) {
         // Although the results of a Collator expression with fixed arguments
         // generally shouldn't change between executions, we can't serialize them
@@ -49,6 +57,19 @@ bool isZoomConstant(const Expression& e) {
     return isGlobalPropertyConstant(e, std::array<std::string, 1>{{"zoom"}});
 }
 
+bool isRuntimeConstant(const Expression& expression) {
+    if (expression.getKind() == Kind::ImageExpression) {
+        return false;
+    }
+
+    bool runtimeConstant = true;
+    expression.eachChild([&](const Expression& e) {
+        if (runtimeConstant && !isRuntimeConstant(e)) {
+            runtimeConstant = false;
+        }
+    });
+    return runtimeConstant;
+}
 
 } // namespace expression
 } // namespace style

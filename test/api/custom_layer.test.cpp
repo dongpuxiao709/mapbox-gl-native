@@ -1,14 +1,14 @@
 #include <mbgl/test/util.hpp>
 
-#include <mbgl/platform/gl_functions.hpp>
+#include <mbgl/gfx/headless_frontend.hpp>
+#include <mbgl/gl/custom_layer.hpp>
+#include <mbgl/gl/defines.hpp>
 #include <mbgl/map/map.hpp>
 #include <mbgl/map/map_options.hpp>
-#include <mbgl/gl/defines.hpp>
-#include <mbgl/gfx/headless_frontend.hpp>
+#include <mbgl/platform/gl_functions.hpp>
 #include <mbgl/storage/resource_options.hpp>
-#include <mbgl/style/style.hpp>
-#include <mbgl/style/layers/custom_layer.hpp>
 #include <mbgl/style/layers/fill_layer.hpp>
+#include <mbgl/style/style.hpp>
 #include <mbgl/util/io.hpp>
 #include <mbgl/util/mat4.hpp>
 #include <mbgl/util/run_loop.hpp>
@@ -108,5 +108,5 @@ TEST(CustomLayer, Basic) {
     layer->setFillColor(Color{ 1.0, 1.0, 0.0, 1.0 });
     map.getStyle().addLayer(std::move(layer));
 
-    test::checkImage("test/fixtures/custom_layer/basic", frontend.render(map), 0.0006, 0.1);
+    test::checkImage("test/fixtures/custom_layer/basic", frontend.render(map).image, 0.0006, 0.1);
 }

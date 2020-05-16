@@ -43,6 +43,7 @@ void ImageManager::addImage(Immutable<style::Image::Impl> image_) {
     if (requestedImages.find(image_->id) != requestedImages.end()) {
         requestedImagesCacheSize += image_->image.bytes();
     }
+    availableImages.emplace(image_->id);
     images.emplace(image_->id, std::move(image_));
 }
 
@@ -81,6 +82,7 @@ void ImageManager::removeImage(const std::string& id) {
         requestedImages.erase(requestedIt);
     }
     images.erase(it);
+    availableImages.erase(id);
     updatedImageVersions.erase(id);
 }
 
@@ -169,6 +171,21 @@ void ImageManager::reduceMemoryUseIfCacheSizeExceedsLimit() {
     }
 }
 
+const std::set<std::string>& ImageManager::getAvailableImages() const {
+    return availableImages;
+}
+
+void ImageManager::clear() {
+    assert(requestors.empty());
+    assert(missingImageRequestors.empty());
+
+    images.clear();
+    availableImages.clear();
+    updatedImageVersions.clear();
+    requestedImages.clear();
+    loaded = false;
+}
+
 void ImageManager::checkMissingAndNotify(ImageRequestor& requestor, const ImageRequestPair& pair) {
     ImageDependencies missingDependencies;
 
@@ -190,6 +207,7 @@ void ImageManager::checkMissingAndNotify(ImageRequestor& requestor, const ImageR
             auto existingRequestorsIt = requestedImages.find(missingImage);
             if (existingRequestorsIt != requestedImages.end()) { // Already asked client about this image.
                 std::set<ImageRequestor*>& existingRequestors = existingRequestorsIt->second;
+                // existingRequestors is empty if all the previous requestors are deleted.
                 if (!existingRequestors.empty() &&
                     (*existingRequestors.begin())
                         ->hasPendingRequest(missingImage)) { // Still waiting for the client response for this image.
@@ -197,16 +215,15 @@ void ImageManager::checkMissingAndNotify(ImageRequestor& requestor, const ImageR
                     existingRequestors.emplace(requestorPtr);
                     continue;
                 }
-                // Unlike icons, pattern changes are not caught
-                // with style-diff meaning that the existing request
-                // could be from the previous style and we cannot
-                // coalesce requests for them.
-                if (dependency.second != ImageType::Pattern) {
-                    continue;
-                }
+                // The request for this image has been already delivered
+                // to the client, so we do not treat it as pending.
+                existingRequestors.emplace(requestorPtr);
+                // TODO: we could `continue;` here, but we need to call `observer->onStyleImageMissing`,
+                // so that rendering is re-launched from the handler at Map::Impl.
+            } else {
+                requestedImages[missingImage].emplace(requestorPtr);
+                requestor.addPendingRequest(missingImage);
             }
-            requestedImages[missingImage].emplace(requestorPtr);
-            requestor.addPendingRequest(missingImage);
 
             auto removePendingRequests = [this, missingImage] {
                 auto existingRequest = requestedImages.find(missingImage);

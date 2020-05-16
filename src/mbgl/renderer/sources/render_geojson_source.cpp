@@ -25,12 +25,14 @@ using FeatureExtensionGetterPtr = FeatureExtensionValue (*)(std::shared_ptr<styl
                                                             std::uint32_t,
                                                             const optional<std::map<std::string, Value>>&);
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 FeatureExtensionValue getChildren(std::shared_ptr<style::GeoJSONData> clusterData,
                                   std::uint32_t clusterID,
                                   const optional<std::map<std::string, Value>>&) {
     return clusterData->getChildren(clusterID);
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 FeatureExtensionValue getLeaves(std::shared_ptr<style::GeoJSONData> clusterData,
                                 std::uint32_t clusterID,
                                 const optional<std::map<std::string, Value>>& args) {
@@ -44,13 +46,14 @@ FeatureExtensionValue getLeaves(std::shared_ptr<style::GeoJSONData> clusterData,
                                               static_cast<std::uint32_t>(*limit),
                                               static_cast<std::uint32_t>(*offset));
             }
-            return clusterData->getLeaves(clusterID, static_cast<std::uint32_t>(*limit));
+            return clusterData->getLeaves(clusterID, static_cast<std::uint32_t>(*limit), 0u);
         }
     }
 
-    return clusterData->getLeaves(clusterID);
+    return clusterData->getLeaves(clusterID, 10u, 0u);
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 FeatureExtensionValue getClusterExpansionZoom(std::shared_ptr<style::GeoJSONData> clusterData,
                                               std::uint32_t clusterID,
                                               const optional<std::map<std::string, Value>>&) {
@@ -85,36 +88,34 @@ void RenderGeoJSONSource::update(Immutable<style::Source::Impl> baseImpl_,
     enabled = needsRendering;
 
     auto data_ = impl().getData().lock();
-
     if (data.lock() != data_) {
         data = data_;
-        tilePyramid.reduceMemoryUse();
-
-        if (data_) {
+        if (parameters.mode != MapMode::Continuous) {
+            // Clearing the tile pyramid in order to avoid render tests being flaky.
+            tilePyramid.clearAll();
+        } else if (data_) {
+            tilePyramid.reduceMemoryUse();
             const uint8_t maxZ = impl().getZoomRange().max;
             for (const auto& pair : tilePyramid.getTiles()) {
                 if (pair.first.canonical.z <= maxZ) {
-                    static_cast<GeoJSONTile*>(pair.second.get())->updateData(data_->getTile(pair.first.canonical), needsRelayout);
+                    static_cast<GeoJSONTile*>(pair.second.get())->updateData(data_, needsRelayout);
                 }
             }
         }
     }
 
-    if (!data_) {
-        tilePyramid.clearAll();
-        return;
-    }
+    if (!data_) return;
 
     tilePyramid.update(layers,
                        needsRendering,
                        needsRelayout,
                        parameters,
-                       SourceType::GeoJSON,
+                       *baseImpl,
                        util::tileSize,
                        impl().getZoomRange(),
                        optional<LatLngBounds>{},
-                       [&, data_] (const OverscaledTileID& tileID) {
-                           return std::make_unique<GeoJSONTile>(tileID, impl().id, parameters, data_->getTile(tileID.canonical));
+                       [&, data_](const OverscaledTileID& tileID) {
+                           return std::make_unique<GeoJSONTile>(tileID, impl().id, parameters, data_);
                        });
 }
 

@@ -23,11 +23,12 @@ public:
     ~RasterTile() override;
 
     std::unique_ptr<TileRenderData> createRenderData() override;
-    void setNecessity(TileNecessity) final;
+    void setNecessity(TileNecessity) override;
+    void setUpdateParameters(const TileUpdateParameters&) override;
 
     void setError(std::exception_ptr);
     void setMetadata(optional<Timestamp> modified, optional<Timestamp> expires);
-    void setData(std::shared_ptr<const std::string> data);
+    void setData(const std::shared_ptr<const std::string>& data);
 
     bool layerPropertiesUpdated(const Immutable<style::LayerProperties>& layerProperties) override;
 

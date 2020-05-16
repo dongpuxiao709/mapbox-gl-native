@@ -16,22 +16,13 @@ std::unique_ptr<style::Layer> SymbolLayerFactory::createLayer(const std::string&
     if (!source) {
         return nullptr;
     }
-
-    std::unique_ptr<style::Layer> layer = std::unique_ptr<style::Layer>(new style::SymbolLayer(id, *source));
-    if (!initSourceLayerAndFilter(layer.get(), value)) {
-        return nullptr;
-    }
-    return layer;
+    return std::unique_ptr<style::Layer>(new style::SymbolLayer(id, *source));
 }
 
 std::unique_ptr<Layout> SymbolLayerFactory::createLayout(const LayoutParameters& parameters,
                                                          std::unique_ptr<GeometryTileLayer> tileLayer,
                                                          const std::vector<Immutable<style::LayerProperties>>& group) noexcept {
-    return std::make_unique<SymbolLayout>(parameters.bucketParameters,
-                                          group,
-                                          std::move(tileLayer),
-                                          parameters.imageDependencies,
-                                          parameters.glyphDependencies);
+    return std::make_unique<SymbolLayout>(parameters.bucketParameters, group, std::move(tileLayer), parameters);
 }
 
 std::unique_ptr<RenderLayer> SymbolLayerFactory::createRenderLayer(Immutable<style::Layer::Impl> impl) noexcept {

@@ -1,13 +1,15 @@
+#include <mbgl/gl/custom_layer.hpp>
+#include <mbgl/gl/custom_layer_impl.hpp>
+#include <mbgl/style/conversion/filter.hpp>
+#include <mbgl/style/conversion/json.hpp>
 #include <mbgl/style/expression/dsl.hpp>
-#include <mbgl/style/expression/match.hpp>
 #include <mbgl/style/expression/format_expression.hpp>
-#include <mbgl/style/style_impl.hpp>
+#include <mbgl/style/expression/image.hpp>
+#include <mbgl/style/expression/match.hpp>
 #include <mbgl/style/layers/background_layer.hpp>
 #include <mbgl/style/layers/background_layer_impl.hpp>
 #include <mbgl/style/layers/circle_layer.hpp>
 #include <mbgl/style/layers/circle_layer_impl.hpp>
-#include <mbgl/style/layers/custom_layer.hpp>
-#include <mbgl/style/layers/custom_layer_impl.hpp>
 #include <mbgl/style/layers/fill_layer.hpp>
 #include <mbgl/style/layers/fill_layer_impl.hpp>
 #include <mbgl/style/layers/line_layer.hpp>
@@ -16,17 +18,19 @@
 #include <mbgl/style/layers/raster_layer_impl.hpp>
 #include <mbgl/style/layers/symbol_layer.hpp>
 #include <mbgl/style/layers/symbol_layer_impl.hpp>
-#include <mbgl/test/util.hpp>
-#include <mbgl/test/stub_layer_observer.hpp>
+#include <mbgl/style/style_impl.hpp>
 #include <mbgl/test/stub_file_source.hpp>
+#include <mbgl/test/stub_layer_observer.hpp>
+#include <mbgl/test/util.hpp>
 #include <mbgl/util/color.hpp>
-#include <mbgl/util/run_loop.hpp>
 #include <mbgl/util/io.hpp>
+#include <mbgl/util/run_loop.hpp>
 
 #include <memory>
 
 using namespace mbgl;
 using namespace mbgl::style;
+using namespace mbgl::style::conversion;
 using namespace expression;
 using namespace expression::dsl;
 using namespace std::literals::string_literals;
@@ -37,7 +41,7 @@ const auto color = Color { 1, 0, 0, 1 };
 const auto opacity = 1.0f;
 const auto radius = 1.0f;
 const auto blur = 1.0f;
-const auto pattern = std::string { "foo" };
+const auto pattern = PropertyValue<expression::Image>{"foo"};
 const auto antialias = false;
 const auto translate = std::array<float, 2> {{ 0, 0 }};
 const auto translateAnchor = TranslateAnchorType::Map;
@@ -58,6 +62,11 @@ const auto duration = 1.0f;
 class MockLayoutProperties : public Properties<TextField> {};
 class MockPaintProperties : public Properties<TextColor> {};
 using MockOverrides = FormatSectionOverrides<MockPaintProperties::OverridableProperties>;
+
+mbgl::style::Filter parseFilter(const std::string& expression) {
+    Error error;
+    return *convertJSON<mbgl::style::Filter>(expression, error);
+}
 
 } // namespace
 
@@ -220,7 +229,7 @@ TEST(Layer, Observer) {
         EXPECT_EQ(layer.get(), &layer_);
         filterChanged = true;
     };
-    layer->setFilter(Filter());
+    layer->setFilter(parseFilter(R"(["==", "foo", "bar"])"));
     EXPECT_TRUE(filterChanged);
 
     // Notifies observer on visibility change.
@@ -282,7 +291,7 @@ TEST(Layer, DuplicateLayer) {
     util::RunLoop loop;
 
     // Setup style
-    StubFileSource fileSource;
+    auto fileSource = std::make_shared<StubFileSource>();
     Style::Impl style { fileSource, 1.0 };
     style.loadJSON(util::read_file("test/fixtures/resources/style-unused-sources.json"));
 
@@ -303,7 +312,7 @@ TEST(Layer, IncompatibleLayer) {
     util::RunLoop loop;
 
     // Setup style
-    StubFileSource fileSource;
+    auto fileSource = std::make_shared<StubFileSource>();
     Style::Impl style{fileSource, 1.0};
     style.loadJSON(util::read_file("test/fixtures/resources/style-unused-sources.json"));
 
@@ -342,7 +351,8 @@ void testHasOverrides(LayoutType& layout) {
     EXPECT_FALSE(MockOverrides::hasOverrides(layout.template get<TextField>()));
 
     // Expression, overridden text-color.
-    FormatExpressionSection section(literal(""), nullopt, nullopt, toColor(literal("red")));
+    FormatExpressionSection section(literal(""));
+    section.setTextSectionOptions(nullopt, nullopt, toColor(literal("red")));
     auto formatExprOverride = std::make_unique<FormatExpression>(std::vector<FormatExpressionSection>{section});
     PropertyExpression<Formatted> propExprOverride(std::move(formatExprOverride));
     layout.template get<TextField>() = PropertyValueType<Formatted>(std::move(propExprOverride));
@@ -350,7 +360,9 @@ void testHasOverrides(LayoutType& layout) {
 
     // Nested expressions, overridden text-color.
     auto formattedExpr1 = format("first paragraph");
-    std::vector<FormatExpressionSection> sections{ { literal("second paragraph"), nullopt, nullopt, toColor(literal("blue")) } };
+    FormatExpressionSection secondParagraph(literal("second paragraph"));
+    secondParagraph.setTextSectionOptions(nullopt, nullopt, toColor(literal("blue")));
+    std::vector<FormatExpressionSection> sections{{std::move(secondParagraph)}};
     auto formattedExpr2 = std::make_unique<FormatExpression>(std::move(sections));
     std::unordered_map<std::string, std::shared_ptr<Expression>> branches{ { "1st", std::move(formattedExpr1) },
                                                                            { "2nd", std::move(formattedExpr2) } };

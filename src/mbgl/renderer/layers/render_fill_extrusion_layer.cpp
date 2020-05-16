@@ -1,20 +1,21 @@
-#include <mbgl/renderer/layers/render_fill_extrusion_layer.hpp>
-#include <mbgl/renderer/buckets/fill_extrusion_bucket.hpp>
-#include <mbgl/renderer/render_tile.hpp>
-#include <mbgl/renderer/paint_parameters.hpp>
-#include <mbgl/renderer/image_manager.hpp>
-#include <mbgl/renderer/render_static_data.hpp>
-#include <mbgl/programs/programs.hpp>
-#include <mbgl/programs/fill_extrusion_program.hpp>
-#include <mbgl/tile/tile.hpp>
-#include <mbgl/style/layers/fill_extrusion_layer_impl.hpp>
 #include <mbgl/geometry/feature_index.hpp>
-#include <mbgl/util/math.hpp>
-#include <mbgl/util/intersection_tests.hpp>
-#include <mbgl/tile/geometry_tile.hpp>
-#include <mbgl/gfx/renderer_backend.hpp>
-#include <mbgl/gfx/render_pass.hpp>
 #include <mbgl/gfx/cull_face_mode.hpp>
+#include <mbgl/gfx/render_pass.hpp>
+#include <mbgl/gfx/renderer_backend.hpp>
+#include <mbgl/programs/fill_extrusion_program.hpp>
+#include <mbgl/programs/programs.hpp>
+#include <mbgl/renderer/buckets/fill_extrusion_bucket.hpp>
+#include <mbgl/renderer/image_manager.hpp>
+#include <mbgl/renderer/layers/render_fill_extrusion_layer.hpp>
+#include <mbgl/renderer/paint_parameters.hpp>
+#include <mbgl/renderer/render_static_data.hpp>
+#include <mbgl/renderer/render_tile.hpp>
+#include <mbgl/style/expression/image.hpp>
+#include <mbgl/style/layers/fill_extrusion_layer_impl.hpp>
+#include <mbgl/tile/geometry_tile.hpp>
+#include <mbgl/tile/tile.hpp>
+#include <mbgl/util/intersection_tests.hpp>
+#include <mbgl/util/math.hpp>
 
 namespace mbgl {
 
@@ -22,7 +23,7 @@ using namespace style;
 
 namespace {
 
-inline const FillExtrusionLayer::Impl& impl(const Immutable<style::Layer::Impl>& impl) {
+inline const FillExtrusionLayer::Impl& impl_cast(const Immutable<style::Layer::Impl>& impl) {
     assert(impl->getTypeInfo() == FillExtrusionLayer::Impl::staticTypeInfo());
     return static_cast<const FillExtrusionLayer::Impl&>(*impl);
 }
@@ -31,13 +32,12 @@ inline const FillExtrusionLayer::Impl& impl(const Immutable<style::Layer::Impl>&
 
 RenderFillExtrusionLayer::RenderFillExtrusionLayer(Immutable<style::FillExtrusionLayer::Impl> _impl)
     : RenderLayer(makeMutable<FillExtrusionLayerProperties>(std::move(_impl))),
-      unevaluated(impl(baseImpl).paint.untransitioned()) {
-}
+      unevaluated(impl_cast(baseImpl).paint.untransitioned()) {}
 
 RenderFillExtrusionLayer::~RenderFillExtrusionLayer() = default;
 
 void RenderFillExtrusionLayer::transition(const TransitionParameters& parameters) {
-    unevaluated = impl(baseImpl).paint.transitioned(parameters, std::move(unevaluated));
+    unevaluated = impl_cast(baseImpl).paint.transitioned(parameters, std::move(unevaluated));
 }
 
 void RenderFillExtrusionLayer::evaluate(const PropertyEvaluationParameters& parameters) {
@@ -171,7 +171,8 @@ void RenderFillExtrusionLayer::render(PaintParameters& parameters) {
         }
     } else {
         // Draw textured extrusions
-        const auto fillPatternValue = evaluated.get<FillExtrusionPattern>().constantOr(mbgl::Faded<std::basic_string<char> >{"", ""});
+        const auto fillPatternValue =
+            evaluated.get<FillExtrusionPattern>().constantOr(mbgl::Faded<expression::Image>{"", ""});
         auto drawTiles = [&](const gfx::StencilMode& stencilMode_, const gfx::ColorMode& colorMode_, const std::string& name) {
             for (const RenderTile& tile : *renderTiles) {
                 const LayerRenderData* renderData = getRenderDataForPass(tile, parameters.pass);
@@ -179,8 +180,8 @@ void RenderFillExtrusionLayer::render(PaintParameters& parameters) {
                     continue;
                 }
                 auto& bucket = static_cast<FillExtrusionBucket&>(*renderData->bucket);
-                optional<ImagePosition> patternPosA = tile.getPattern(fillPatternValue.from);
-                optional<ImagePosition> patternPosB = tile.getPattern(fillPatternValue.to);
+                optional<ImagePosition> patternPosA = tile.getPattern(fillPatternValue.from.id());
+                optional<ImagePosition> patternPosB = tile.getPattern(fillPatternValue.to.id());
 
                 draw(
                     parameters.programs.getFillExtrusionLayerPrograms().fillExtrusionPattern,

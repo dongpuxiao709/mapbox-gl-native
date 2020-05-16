@@ -14,11 +14,14 @@
 #include <mbgl/style/layers/symbol_layer_impl.hpp>
 #include <mbgl/renderer/layers/render_symbol_layer.hpp>
 
-
 #include <cmath>
 #include <array>
 
 namespace mbgl {
+
+const uint16_t MAX_GLYPH_ICON_SIZE = 255;
+const uint16_t SIZE_PACK_FACTOR = 128;
+const uint16_t MAX_PACKED_SIZE = MAX_GLYPH_ICON_SIZE * SIZE_PACK_FACTOR;
 
 namespace style {
 class SymbolPropertyValues;
@@ -42,9 +45,7 @@ MBGL_DEFINE_UNIFORM_SCALAR(bool, rotate_symbol);
 MBGL_DEFINE_UNIFORM_SCALAR(float, aspect_ratio);
 } // namespace uniforms
 
-using SymbolLayoutAttributes = TypeList<
-    attributes::pos_offset,
-    attributes::data<uint16_t, 4>>;
+using SymbolLayoutAttributes = TypeList<attributes::pos_offset, attributes::data<uint16_t, 4>, attributes::pixeloffset>;
 
 using SymbolDynamicLayoutAttributes = TypeList<attributes::projected_pos>;
 
@@ -72,9 +73,9 @@ public:
         uniforms::size>;
     using UniformValues = gfx::UniformValues<UniformList>;
 
-    static std::unique_ptr<SymbolSizeBinder> create(const float tileZoom,
+    static std::unique_ptr<SymbolSizeBinder> create(float tileZoom,
                                                     const style::PropertyValue<float>& sizeProperty,
-                                                    const float defaultValue);
+                                                    float defaultValue);
 
     virtual Range<float> getVertexSizeData(const GeometryTileFeature& feature) = 0;
     virtual ZoomEvaluatedSize evaluateForZoom(float currentZoom) const = 0;
@@ -197,25 +198,28 @@ public:
 class SymbolProgramBase {
 public:
     static gfx::Vertex<SymbolLayoutAttributes> layoutVertex(Point<float> labelAnchor,
-                         Point<float> o,
-                         float glyphOffsetY,
-                         uint16_t tx,
-                         uint16_t ty,
-                         const Range<float>& sizeData) {
+                                                            Point<float> o,
+                                                            float glyphOffsetY,
+                                                            uint16_t tx,
+                                                            uint16_t ty,
+                                                            const Range<float>& sizeData,
+                                                            bool isSDF,
+                                                            Point<float> pixelOffset,
+                                                            Point<float> minFontScale) {
+        const uint16_t aSizeMin =
+            (std::min(MAX_PACKED_SIZE, static_cast<uint16_t>(sizeData.min * SIZE_PACK_FACTOR)) << 1) + uint16_t(isSDF);
+        const uint16_t aSizeMax = std::min(MAX_PACKED_SIZE, static_cast<uint16_t>(sizeData.max * SIZE_PACK_FACTOR));
         return {
             // combining pos and offset to reduce number of vertex attributes passed to shader (8 max for some devices)
-            {{
-                static_cast<int16_t>(labelAnchor.x),
-                static_cast<int16_t>(labelAnchor.y),
-                static_cast<int16_t>(::round(o.x * 32)),  // use 1/32 pixels for placement
-                static_cast<int16_t>(::round((o.y + glyphOffsetY) * 32))
-            }},
-            {{
-                tx,
-                ty,
-                static_cast<uint16_t>(sizeData.min * 256),
-                static_cast<uint16_t>(sizeData.max * 256)
-            }}
+            {{static_cast<int16_t>(labelAnchor.x),
+              static_cast<int16_t>(labelAnchor.y),
+              static_cast<int16_t>(std::round(o.x * 32)), // use 1/32 pixels for placement
+              static_cast<int16_t>(std::round((o.y + glyphOffsetY) * 32))}},
+            {{tx, ty, aSizeMin, aSizeMax}},
+            {{static_cast<int16_t>(pixelOffset.x * 16),
+              static_cast<int16_t>(pixelOffset.y * 16),
+              static_cast<int16_t>(minFontScale.x * 256),
+              static_cast<int16_t>(minFontScale.y * 256)}},
         };
     }
 
@@ -402,15 +406,15 @@ class SymbolIconProgram : public SymbolProgram<
 public:
     using SymbolProgram::SymbolProgram;
 
-    static LayoutUniformValues layoutUniformValues(const bool isText,
-                                                   const bool hasVariablePacement,
+    static LayoutUniformValues layoutUniformValues(bool isText,
+                                                   bool hasVariablePacement,
                                                    const style::SymbolPropertyValues&,
                                                    const Size& texsize,
                                                    const std::array<float, 2>& pixelsToGLUnits,
-                                                   const bool alongLine,
+                                                   bool alongLine,
                                                    const RenderTile&,
                                                    const TransformState&,
-                                                   const float symbolFadeChange);
+                                                   float symbolFadeChange);
 };
 
 enum class SymbolSDFPart {
@@ -418,73 +422,86 @@ enum class SymbolSDFPart {
     Halo = 0
 };
 
+using SymbolSDFProgramUniforms = TypeList<uniforms::matrix,
+                                          uniforms::label_plane_matrix,
+                                          uniforms::coord_matrix,
+                                          uniforms::extrude_scale,
+                                          uniforms::texsize,
+                                          uniforms::fade_change,
+                                          uniforms::is_text,
+                                          uniforms::camera_to_center_distance,
+                                          uniforms::pitch,
+                                          uniforms::pitch_with_map,
+                                          uniforms::rotate_symbol,
+                                          uniforms::aspect_ratio,
+                                          uniforms::gamma_scale,
+                                          uniforms::device_pixel_ratio,
+                                          uniforms::is_halo>;
+
 template <class Name, class PaintProperties>
-class SymbolSDFProgram : public SymbolProgram<
-    Name,
-    gfx::PrimitiveType::Triangle,
-    SymbolLayoutAttributes,
-    TypeList<
-        uniforms::matrix,
-        uniforms::label_plane_matrix,
-        uniforms::coord_matrix,
-        uniforms::extrude_scale,
-        uniforms::texsize,
-        uniforms::fade_change,
-        uniforms::is_text,
-        uniforms::camera_to_center_distance,
-        uniforms::pitch,
-        uniforms::pitch_with_map,
-        uniforms::rotate_symbol,
-        uniforms::aspect_ratio,
-        uniforms::gamma_scale,
-        uniforms::device_pixel_ratio,
-        uniforms::is_halo>,
-    TypeList<
-        textures::texture>,
-    PaintProperties>
-{
+class SymbolSDFProgram : public SymbolProgram<Name,
+                                              gfx::PrimitiveType::Triangle,
+                                              SymbolLayoutAttributes,
+                                              SymbolSDFProgramUniforms,
+                                              TypeList<textures::texture>,
+                                              PaintProperties> {
 public:
-    using BaseProgram = SymbolProgram<
-        Name,
-        gfx::PrimitiveType::Triangle,
-        SymbolLayoutAttributes,
-        TypeList<
-            uniforms::matrix,
-            uniforms::label_plane_matrix,
-            uniforms::coord_matrix,
-            uniforms::extrude_scale,
-            uniforms::texsize,
-            uniforms::fade_change,
-            uniforms::is_text,
-            uniforms::camera_to_center_distance,
-            uniforms::pitch,
-            uniforms::pitch_with_map,
-            uniforms::rotate_symbol,
-            uniforms::aspect_ratio,
-            uniforms::gamma_scale,
-            uniforms::device_pixel_ratio,
-            uniforms::is_halo>,
-        TypeList<
-            textures::texture>,
-        PaintProperties>;
+    using BaseProgram = SymbolProgram<Name,
+                                      gfx::PrimitiveType::Triangle,
+                                      SymbolLayoutAttributes,
+                                      SymbolSDFProgramUniforms,
+                                      TypeList<textures::texture>,
+                                      PaintProperties>;
 
     using LayoutUniformValues = typename BaseProgram::LayoutUniformValues;
 
-
-
     using BaseProgram::BaseProgram;
 
-    static LayoutUniformValues layoutUniformValues(const bool isText,
-                                                   const bool hasVariablePacement,
+    static LayoutUniformValues layoutUniformValues(bool isText,
+                                                   bool hasVariablePacement,
                                                    const style::SymbolPropertyValues&,
                                                    const Size& texsize,
                                                    const std::array<float, 2>& pixelsToGLUnits,
-                                                   const float pixelRatio,
-                                                   const bool alongLine,
+                                                   float pixelRatio,
+                                                   bool alongLine,
                                                    const RenderTile&,
                                                    const TransformState&,
-                                                   const float SymbolFadeChange,
-                                                   const SymbolSDFPart);
+                                                   float SymbolFadeChange,
+                                                   SymbolSDFPart);
+};
+
+using SymbolTextAndIconProgramUniforms = TypeList<uniforms::texsize_icon>;
+
+class SymbolTextAndIconProgram
+    : public SymbolProgram<SymbolTextAndIconProgram,
+                           gfx::PrimitiveType::Triangle,
+                           SymbolLayoutAttributes,
+                           TypeListConcat<SymbolSDFProgramUniforms, SymbolTextAndIconProgramUniforms>,
+                           TypeList<textures::texture, textures::texture_icon>,
+                           style::TextPaintProperties> {
+public:
+    using BaseProgram = SymbolProgram<SymbolTextAndIconProgram,
+                                      gfx::PrimitiveType::Triangle,
+                                      SymbolLayoutAttributes,
+                                      TypeListConcat<SymbolSDFProgramUniforms, SymbolTextAndIconProgramUniforms>,
+                                      TypeList<textures::texture, textures::texture_icon>,
+                                      style::TextPaintProperties>;
+
+    using LayoutUniformValues = typename BaseProgram::LayoutUniformValues;
+
+    using BaseProgram::BaseProgram;
+
+    static LayoutUniformValues layoutUniformValues(bool hasVariablePacement,
+                                                   const style::SymbolPropertyValues&,
+                                                   const Size& texsize,
+                                                   const Size& texsize_icon,
+                                                   const std::array<float, 2>& pixelsToGLUnits,
+                                                   float pixelRatio,
+                                                   bool alongLine,
+                                                   const RenderTile&,
+                                                   const TransformState&,
+                                                   float SymbolFadeChange,
+                                                   SymbolSDFPart);
 };
 
 class SymbolSDFIconProgram : public SymbolSDFProgram<SymbolSDFIconProgram, style::IconPaintProperties> {
@@ -507,11 +524,13 @@ public:
         : symbolIcon(context, programParameters),
           symbolIconSDF(context, programParameters),
           symbolGlyph(context, programParameters),
+          symbolTextAndIcon(context, programParameters),
           collisionBox(context, programParameters),
           collisionCircle(context, programParameters) {}
     SymbolIconProgram symbolIcon;
     SymbolSDFIconProgram symbolIconSDF;
     SymbolSDFTextProgram symbolGlyph;
+    SymbolTextAndIconProgram symbolTextAndIcon;
     CollisionBoxProgram collisionBox;
     CollisionCircleProgram collisionCircle;
 };

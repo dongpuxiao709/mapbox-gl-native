@@ -7,35 +7,38 @@
 #include "qt_conversion.hpp"
 #include "qt_geojson.hpp"
 
+#include <mbgl/actor/scheduler.hpp>
 #include <mbgl/annotation/annotation.hpp>
+#include <mbgl/gl/custom_layer.hpp>
 #include <mbgl/map/camera.hpp>
 #include <mbgl/map/map.hpp>
 #include <mbgl/map/map_options.hpp>
 #include <mbgl/math/log2.hpp>
 #include <mbgl/math/minmax.hpp>
-#include <mbgl/style/style.hpp>
-#include <mbgl/style/conversion/layer.hpp>
-#include <mbgl/style/conversion/source.hpp>
+#include <mbgl/renderer/renderer.hpp>
+#include <mbgl/storage/file_source_manager.hpp>
+#include <mbgl/storage/network_status.hpp>
+#include <mbgl/storage/online_file_source.hpp>
+#include <mbgl/storage/resource_options.hpp>
 #include <mbgl/style/conversion/filter.hpp>
 #include <mbgl/style/conversion/geojson.hpp>
+#include <mbgl/style/conversion/layer.hpp>
+#include <mbgl/style/conversion/source.hpp>
 #include <mbgl/style/conversion_impl.hpp>
 #include <mbgl/style/filter.hpp>
-#include <mbgl/style/layers/custom_layer.hpp>
+#include <mbgl/style/image.hpp>
 #include <mbgl/style/layers/background_layer.hpp>
 #include <mbgl/style/layers/circle_layer.hpp>
-#include <mbgl/style/layers/fill_layer.hpp>
 #include <mbgl/style/layers/fill_extrusion_layer.hpp>
+#include <mbgl/style/layers/fill_layer.hpp>
 #include <mbgl/style/layers/line_layer.hpp>
 #include <mbgl/style/layers/raster_layer.hpp>
 #include <mbgl/style/layers/symbol_layer.hpp>
 #include <mbgl/style/rapidjson_conversion.hpp>
 #include <mbgl/style/sources/geojson_source.hpp>
+#include <mbgl/style/sources/image_source.hpp>
+#include <mbgl/style/style.hpp>
 #include <mbgl/style/transition_options.hpp>
-#include <mbgl/style/image.hpp>
-#include <mbgl/renderer/renderer.hpp>
-#include <mbgl/storage/default_file_source.hpp>
-#include <mbgl/storage/network_status.hpp>
-#include <mbgl/storage/resource_options.hpp>
 #include <mbgl/util/color.hpp>
 #include <mbgl/util/constants.hpp>
 #include <mbgl/util/geo.hpp>
@@ -44,7 +47,6 @@
 #include <mbgl/util/rapidjson.hpp>
 #include <mbgl/util/run_loop.hpp>
 #include <mbgl/util/traits.hpp>
-#include <mbgl/actor/scheduler.hpp>
 
 #include <QGuiApplication>
 
@@ -582,15 +584,6 @@ QMapboxGL::~QMapboxGL()
 }
 
 /*!
-    Cycles through several debug options like showing the tile borders,
-    tile numbers, expiration time and wireframe.
-*/
-void QMapboxGL::cycleDebugOptions()
-{
-    d_ptr->mapObj->cycleDebugOptions();
-}
-
-/*!
     \property QMapboxGL::styleJson
     \brief the map style JSON.
 
@@ -744,7 +737,7 @@ double QMapboxGL::maximumZoom() const
 */
 Coordinate QMapboxGL::coordinate() const
 {
-    const mbgl::LatLng& latLng = *d_ptr->mapObj->getCameraOptions(d_ptr->margins).center;
+    const mbgl::LatLng latLng = *d_ptr->mapObj->getCameraOptions(d_ptr->margins).center;
     return Coordinate(latLng.latitude(), latLng.longitude());
 }
 
@@ -1010,7 +1003,7 @@ void QMapboxGL::removeAnnotation(QMapbox::AnnotationID id)
 */
 bool QMapboxGL::setLayoutProperty(const QString& layer, const QString& propertyName, const QVariant& value)
 {
-    return d_ptr->setProperty(&mbgl::style::Layer::setLayoutProperty, layer, propertyName, value);
+    return d_ptr->setProperty(&mbgl::style::Layer::setProperty, layer, propertyName, value);
 }
 
 /*!
@@ -1070,7 +1063,7 @@ bool QMapboxGL::setLayoutProperty(const QString& layer, const QString& propertyN
 
 bool QMapboxGL::setPaintProperty(const QString& layer, const QString& propertyName, const QVariant& value)
 {
-    return d_ptr->setProperty(&mbgl::style::Layer::setPaintProperty, layer, propertyName, value);
+    return d_ptr->setProperty(&mbgl::style::Layer::setProperty, layer, propertyName, value);
 }
 
 /*!
@@ -1295,7 +1288,7 @@ bool QMapboxGL::sourceExists(const QString& sourceID)
     Updates the source \a id with new \a params.
 
     If the source does not exist, it will be added like in addSource(). Only
-    GeoJSON sources can be updated.
+    image and GeoJSON sources can be updated.
 */
 void QMapboxGL::updateSource(const QString &id, const QVariantMap &params)
 {
@@ -1309,12 +1302,15 @@ void QMapboxGL::updateSource(const QString &id, const QVariantMap &params)
     }
 
     auto sourceGeoJSON = source->as<GeoJSONSource>();
-    if (!sourceGeoJSON) {
-        qWarning() << "Unable to update source: only GeoJSON sources are mutable.";
+    auto sourceImage = source->as<ImageSource>();
+    if (!sourceGeoJSON && !sourceImage) {
+        qWarning() << "Unable to update source: only GeoJSON and Image sources are mutable.";
         return;
     }
 
-    if (params.contains("data")) {
+    if (sourceImage && params.contains("url")) {
+        sourceImage->setURL(params["url"].toString().toStdString());
+    } else if (sourceGeoJSON && params.contains("data")) {
         Error error;
         auto result = convert<mbgl::GeoJSON>(params["data"], error);
         if (result) {
@@ -1742,13 +1738,22 @@ QMapboxGLPrivate::QMapboxGLPrivate(QMapboxGL *q, const QMapboxGLSettings &settin
                                          resourceOptions);
 
      if (settings.resourceTransform()) {
-         m_resourceTransform = std::make_unique<mbgl::Actor<mbgl::ResourceTransform>>(
+         m_resourceTransform = std::make_unique<mbgl::Actor<mbgl::ResourceTransform::TransformCallback>>(
              *mbgl::Scheduler::GetCurrent(),
-             [callback = settings.resourceTransform()](mbgl::Resource::Kind, const std::string &url_) -> std::string {
-                 return callback(std::move(url_));
+             [callback = settings.resourceTransform()](
+                 mbgl::Resource::Kind, const std::string &url_, mbgl::ResourceTransform::FinishedCallback onFinished) {
+                 onFinished(callback(std::move(url_)));
              });
-         auto fs = mbgl::FileSource::getSharedFileSource(resourceOptions);
-         std::static_pointer_cast<mbgl::DefaultFileSource>(fs)->setResourceTransform(m_resourceTransform->self());
+
+         mbgl::ResourceTransform transform{[actorRef = m_resourceTransform->self()](
+                                               mbgl::Resource::Kind kind,
+                                               const std::string &url,
+                                               mbgl::ResourceTransform::FinishedCallback onFinished) {
+             actorRef.invoke(&mbgl::ResourceTransform::TransformCallback::operator(), kind, url, std::move(onFinished));
+         }};
+         std::shared_ptr<mbgl::FileSource> fs =
+             mbgl::FileSourceManager::get()->getFileSource(mbgl::FileSourceType::Network, resourceOptions);
+         fs->setResourceTransform(std::move(transform));
      }
 
     // Needs to be Queued to give time to discard redundant draw calls via the `renderQueued` flag.

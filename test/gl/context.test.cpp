@@ -1,18 +1,18 @@
 #include <mbgl/test/util.hpp>
 
-#include <mbgl/platform/gl_functions.hpp>
+#include <mbgl/gfx/backend_scope.hpp>
+#include <mbgl/gfx/headless_frontend.hpp>
 #include <mbgl/gl/context.hpp>
+#include <mbgl/gl/custom_layer.hpp>
+#include <mbgl/gl/defines.hpp>
+#include <mbgl/gl/renderable_resource.hpp>
 #include <mbgl/map/map.hpp>
 #include <mbgl/map/map_options.hpp>
-#include <mbgl/gfx/backend_scope.hpp>
-#include <mbgl/gl/defines.hpp>
-#include <mbgl/gfx/headless_frontend.hpp>
-#include <mbgl/gl/renderable_resource.hpp>
+#include <mbgl/platform/gl_functions.hpp>
 #include <mbgl/storage/resource_options.hpp>
-#include <mbgl/style/style.hpp>
-#include <mbgl/style/layers/custom_layer.hpp>
-#include <mbgl/style/layers/fill_layer.hpp>
 #include <mbgl/style/layers/background_layer.hpp>
+#include <mbgl/style/layers/fill_layer.hpp>
+#include <mbgl/style/style.hpp>
 #include <mbgl/util/io.hpp>
 #include <mbgl/util/mat4.hpp>
 #include <mbgl/util/run_loop.hpp>
@@ -119,5 +119,5 @@ TEST(GLContextMode, Shared) {
         MBGL_CHECK_ERROR(glDrawArrays(GL_TRIANGLE_STRIP, 0, 3));
     }
 
-    test::checkImage("test/fixtures/shared_context", frontend.render(map), 0.5, 0.1);
+    test::checkImage("test/fixtures/shared_context", frontend.render(map).image, 0.5, 0.1);
 }

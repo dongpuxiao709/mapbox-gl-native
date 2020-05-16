@@ -7,8 +7,7 @@
 
 class GLFWGLRenderableResource final : public mbgl::gl::RenderableResource {
 public:
-    GLFWGLRenderableResource(GLFWGLBackend& backend_) : backend(backend_) {
-    }
+    explicit GLFWGLRenderableResource(GLFWGLBackend& backend_) : backend(backend_) {}
 
     void bind() override {
         backend.setFramebufferBinding(0);
@@ -27,7 +26,8 @@ GLFWGLBackend::GLFWGLBackend(GLFWwindow* window_, const bool capFrameRate)
     : mbgl::gl::RendererBackend(mbgl::gfx::ContextMode::Unique),
       mbgl::gfx::Renderable(
           [window_] {
-              int fbWidth, fbHeight;
+              int fbWidth;
+              int fbHeight;
               glfwGetFramebufferSize(window_, &fbWidth, &fbHeight);
               return mbgl::Size{ static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight) };
           }(),
@@ -58,7 +58,7 @@ mbgl::gl::ProcAddress GLFWGLBackend::getExtensionFunctionPointer(const char* nam
 
 void GLFWGLBackend::updateAssumedState() {
     assumeFramebufferBinding(0);
-    assumeViewport(0, 0, size);
+    setViewport(0, 0, size);
 }
 
 mbgl::Size GLFWGLBackend::getSize() const {

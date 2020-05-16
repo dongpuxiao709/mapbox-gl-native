@@ -25,11 +25,11 @@ void RenderVectorSource::updateInternal(const Tileset& tileset,
                        needsRendering,
                        needsRelayout,
                        parameters,
-                       SourceType::Vector,
+                       *baseImpl,
                        util::tileSize,
                        tileset.zoomRange,
                        tileset.bounds,
-                       [&] (const OverscaledTileID& tileID) {
+                       [&](const OverscaledTileID& tileID) {
                            return std::make_unique<VectorTile>(tileID, baseImpl->id, parameters, tileset);
                        });
 }

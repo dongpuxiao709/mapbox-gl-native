@@ -11,7 +11,7 @@ namespace mbgl {
 
 using namespace style;
 
-static_assert(sizeof(SymbolLayoutVertex) == 16, "expected SymbolLayoutVertex size");
+static_assert(sizeof(SymbolLayoutVertex) == 24, "expected SymbolLayoutVertex size");
 
 std::unique_ptr<SymbolSizeBinder> SymbolSizeBinder::create(const float tileZoom,
                                                     const style::PropertyValue<float>& sizeProperty,
@@ -154,6 +154,32 @@ SymbolSDFProgram<Name, PaintProperties>::layoutUniformValues(const bool isText,
         uniforms::device_pixel_ratio::Value( pixelRatio ),
         uniforms::is_halo::Value( part == SymbolSDFPart::Halo )
     );
+}
+
+SymbolTextAndIconProgram::LayoutUniformValues SymbolTextAndIconProgram::layoutUniformValues(
+    const bool hasVariablePacement,
+    const style::SymbolPropertyValues& values,
+    const Size& texsize,
+    const Size& texsize_icon,
+    const std::array<float, 2>& pixelsToGLUnits,
+    const float pixelRatio,
+    const bool alongLine,
+    const RenderTile& tile,
+    const TransformState& state,
+    const float symbolFadeChange,
+    const SymbolSDFPart part) {
+    return {SymbolSDFProgram<SymbolSDFTextProgram, style::TextPaintProperties>::layoutUniformValues(true,
+                                                                                                    hasVariablePacement,
+                                                                                                    values,
+                                                                                                    texsize,
+                                                                                                    pixelsToGLUnits,
+                                                                                                    pixelRatio,
+                                                                                                    alongLine,
+                                                                                                    tile,
+                                                                                                    state,
+                                                                                                    symbolFadeChange,
+                                                                                                    part)
+                .concat(gfx::UniformValues<SymbolTextAndIconProgramUniforms>(uniforms::texsize::Value(texsize_icon)))};
 }
 
 template class SymbolSDFProgram<SymbolSDFIconProgram, style::IconPaintProperties>;

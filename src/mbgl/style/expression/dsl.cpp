@@ -1,18 +1,20 @@
-#include <mbgl/style/expression/dsl.hpp>
-#include <mbgl/style/expression/dsl_impl.hpp>
-#include <mbgl/style/expression/error.hpp>
-#include <mbgl/style/expression/literal.hpp>
 #include <mbgl/style/expression/assertion.hpp>
 #include <mbgl/style/expression/coercion.hpp>
 #include <mbgl/style/expression/comparison.hpp>
-#include <mbgl/style/expression/step.hpp>
-#include <mbgl/style/expression/interpolate.hpp>
 #include <mbgl/style/expression/compound_expression.hpp>
+#include <mbgl/style/expression/dsl.hpp>
+#include <mbgl/style/expression/dsl_impl.hpp>
+#include <mbgl/style/expression/error.hpp>
 #include <mbgl/style/expression/format_expression.hpp>
+#include <mbgl/style/expression/image_expression.hpp>
+#include <mbgl/style/expression/interpolate.hpp>
+#include <mbgl/style/expression/literal.hpp>
+#include <mbgl/style/expression/step.hpp>
 
+#include <rapidjson/document.h>
 #include <mapbox/geojsonvt.hpp>
 #include <mbgl/style/conversion/json.hpp>
-#include <rapidjson/document.h>
+#include <utility>
 
 namespace mbgl {
 namespace style {
@@ -53,7 +55,7 @@ std::unique_ptr<Expression> literal(const char* value) {
     return literal(std::string(value));
 }
 
-std::unique_ptr<Expression> literal(Value value) {
+std::unique_ptr<Expression> literal(const Value& value) {
     return std::make_unique<Literal>(value);
 }
 
@@ -73,7 +75,7 @@ std::unique_ptr<Expression> literal(std::initializer_list<const char *> value) {
     return literal(values);
 }
 
-std::unique_ptr<Expression> assertion(type::Type type,
+std::unique_ptr<Expression> assertion(const type::Type& type,
                                       std::unique_ptr<Expression> value,
                                       std::unique_ptr<Expression> def) {
     std::vector<std::unique_ptr<Expression>> v  = vec(std::move(value));
@@ -98,7 +100,7 @@ std::unique_ptr<Expression> boolean(std::unique_ptr<Expression> value,
     return assertion(type::Boolean, std::move(value), std::move(def));
 }
 
-std::unique_ptr<Expression> coercion(type::Type type,
+std::unique_ptr<Expression> coercion(const type::Type& type,
                                      std::unique_ptr<Expression> value,
                                      std::unique_ptr<Expression> def) {
     std::vector<std::unique_ptr<Expression>> v = vec(std::move(value));
@@ -122,7 +124,11 @@ std::unique_ptr<Expression> toFormatted(std::unique_ptr<Expression> value,
                                         std::unique_ptr<Expression> def) {
     return coercion(type::Formatted, std::move(value), std::move(def));
 }
-    
+
+std::unique_ptr<Expression> toImage(std::unique_ptr<Expression> value, std::unique_ptr<Expression> def) {
+    return coercion(type::Image, std::move(value), std::move(def));
+}
+
 std::unique_ptr<Expression> get(const char* value) {
     return get(literal(value));
 }
@@ -188,7 +194,7 @@ std::unique_ptr<Expression> interpolate(Interpolator interpolator,
     std::map<double, std::unique_ptr<Expression>> stops;
     stops[input1] = std::move(output1);
     ParsingContext ctx;
-    ParseResult result = createInterpolate(type, interpolator, std::move(input), std::move(stops), ctx);
+    ParseResult result = createInterpolate(type, std::move(interpolator), std::move(input), std::move(stops), ctx);
     assert(result);
     return std::move(*result);
 }
@@ -202,7 +208,7 @@ std::unique_ptr<Expression> interpolate(Interpolator interpolator,
     stops[input1] = std::move(output1);
     stops[input2] = std::move(output2);
     ParsingContext ctx;
-    ParseResult result = createInterpolate(type, interpolator, std::move(input), std::move(stops), ctx);
+    ParseResult result = createInterpolate(type, std::move(interpolator), std::move(input), std::move(stops), ctx);
     assert(result);
     return std::move(*result);
 }
@@ -218,7 +224,7 @@ std::unique_ptr<Expression> interpolate(Interpolator interpolator,
     stops[input2] = std::move(output2);
     stops[input3] = std::move(output3);
     ParsingContext ctx;
-    ParseResult result = createInterpolate(type, interpolator, std::move(input), std::move(stops), ctx);
+    ParseResult result = createInterpolate(type, std::move(interpolator), std::move(input), std::move(stops), ctx);
     assert(result);
     return std::move(*result);
 }
@@ -232,9 +238,16 @@ std::unique_ptr<Expression> format(const char* value) {
 }
 
 std::unique_ptr<Expression> format(std::unique_ptr<Expression> input) {
-    std::vector<FormatExpressionSection> sections;
-    sections.emplace_back(std::move(input), nullopt, nullopt, nullopt);
-    return std::make_unique<FormatExpression>(sections);
+    std::vector<FormatExpressionSection> sections{FormatExpressionSection(std::move(input))};
+    return std::make_unique<FormatExpression>(std::move(sections));
+}
+
+std::unique_ptr<Expression> image(const char* value) {
+    return std::make_unique<Literal>(Image(value));
+}
+
+std::unique_ptr<Expression> image(std::unique_ptr<Expression> expression) {
+    return std::make_unique<ImageExpression>(std::move(expression));
 }
 
 } // namespace dsl

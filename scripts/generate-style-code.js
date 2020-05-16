@@ -6,11 +6,6 @@ const ejs = require('ejs');
 const spec = require('./style-spec');
 const colorParser = require('csscolorparser');
 
-// FIXME: https://github.com/mapbox/mapbox-gl-native/issues/15008
-delete spec.layout_circle["circle-sort-key"]
-delete spec.layout_line["line-sort-key"]
-delete spec.layout_fill["fill-sort-key"]
-
 require('./style-code');
 
 function parseCSSColor(str) {
@@ -35,8 +30,9 @@ global.expressionType = function (property) {
         case 'number':
         case 'enum':
             return 'NumberType';
+        case 'image':
+            return 'ImageType';
         case 'string':
-        case 'image': // TODO: replace once we implement image expressions
             return 'StringType';
         case 'color':
             return `ColorType`;
@@ -65,11 +61,19 @@ global.evaluatedType = function (property) {
   case 'boolean':
     return 'bool';
   case 'number':
-    return 'float';
+    // TODO: Check if 'Rotation' should be used for other properties,
+    // such as icon-rotate
+    if (/bearing$/.test(property.name) &&
+        property.period == 360 &&
+        property.units =='degrees') {
+      return 'Rotation';
+    }
+    return /location$/.test(property.name) ? 'double' : 'float';
+  case 'resolvedImage':
+      return 'expression::Image';
   case 'formatted':
     return 'expression::Formatted';
   case 'string':
-  case 'image': // TODO: replace once we implement image expressions
     return 'std::string';
   case 'enum':
     return (isLightProperty(property) ? 'Light' : '') + `${camelize(property.name)}Type`;
@@ -77,7 +81,7 @@ global.evaluatedType = function (property) {
     return `Color`;
   case 'array':
     if (property.length) {
-      return `std::array<${evaluatedType({type: property.value})}, ${property.length}>`;
+      return `std::array<${evaluatedType({type: property.value, name: property.name})}, ${property.length}>`;
     } else {
       return `std::vector<${evaluatedType({type: property.value, name: property.name})}>`;
     }
@@ -168,8 +172,8 @@ global.defaultValue = function (property) {
   }
   case 'formatted':
   case 'string':
-  case 'image': // TODO: replace once we implement image expressions
-    return JSON.stringify(property.default || "");
+  case 'resolvedImage':
+    return property.default ? `{${JSON.stringify(property.default)}}` : '{}';
   case 'enum':
     if (property.default === undefined) {
       return `${evaluatedType(property)}::Undefined`;
@@ -191,9 +195,9 @@ global.defaultValue = function (property) {
   case 'array':
     const defaults = (property.default || []).map((e) => defaultValue({ type: property.value, default: e }));
     if (property.length) {
-      return `{{ ${defaults.join(', ')} }}`;
+      return `{{${defaults.join(', ')}}}`;
     } else {
-      return `{ ${defaults.join(', ')} }`;
+      return `{${defaults.join(', ')}}`;
     }
   default:
     return property.default;

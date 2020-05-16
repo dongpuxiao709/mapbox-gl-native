@@ -21,16 +21,21 @@ struct ShapedTextOrientations {
     bool singleLine = false;
 };
 
+enum class SymbolContent : uint8_t { None = 0, Text = 1 << 0, IconRGBA = 1 << 1, IconSDF = 1 << 2 };
+
 struct SymbolInstanceSharedData {
     SymbolInstanceSharedData(GeometryCoordinates line,
-                            const ShapedTextOrientations& shapedTextOrientations,
-                            const optional<PositionedIcon>& shapedIcon,
-                            const optional<PositionedIcon>& verticallyShapedIcon,
-                            const style::SymbolLayoutProperties::Evaluated& layout,
-                            const style::SymbolPlacementType textPlacement,
-                            const std::array<float, 2>& textOffset,
-                            const GlyphPositions& positions,
-                            bool allowVerticalPlacement);
+                             const ShapedTextOrientations& shapedTextOrientations,
+                             const optional<PositionedIcon>& shapedIcon,
+                             const optional<PositionedIcon>& verticallyShapedIcon,
+                             const style::SymbolLayoutProperties::Evaluated& layout,
+                             style::SymbolPlacementType textPlacement,
+                             const std::array<float, 2>& textOffset,
+                             const ImageMap& imageMap,
+                             float iconRotation,
+                             SymbolContent iconType,
+                             bool hasIconTextFit,
+                             bool allowVerticalPlacement);
     bool empty() const;
     GeometryCoordinates line;
     // Note: When singleLine == true, only `rightJustifiedGlyphQuads` is populated.
@@ -38,15 +43,8 @@ struct SymbolInstanceSharedData {
     SymbolQuads centerJustifiedGlyphQuads;
     SymbolQuads leftJustifiedGlyphQuads;
     SymbolQuads verticalGlyphQuads;
-    optional<SymbolQuad> iconQuad;
-    optional<SymbolQuad> verticalIconQuad;
-};
-
-enum class SymbolContent : uint8_t {
-    None = 0,
-    Text = 1 << 0,
-    IconRGBA = 1 << 1,
-    IconSDF = 1 << 2
+    optional<SymbolQuads> iconQuads;
+    optional<SymbolQuads> verticalIconQuads;
 };
 
 class SymbolInstance {
@@ -56,23 +54,23 @@ public:
                    const ShapedTextOrientations& shapedTextOrientations,
                    const optional<PositionedIcon>& shapedIcon,
                    const optional<PositionedIcon>& verticallyShapedIcon,
-                   const float textBoxScale,
-                   const float textPadding,
-                   const style::SymbolPlacementType textPlacement,
+                   float textBoxScale,
+                   float textPadding,
+                   style::SymbolPlacementType textPlacement,
                    const std::array<float, 2>& textOffset,
-                   const float iconBoxScale,
-                   const float iconPadding,
+                   float iconBoxScale,
+                   float iconPadding,
                    const std::array<float, 2>& iconOffset,
                    const IndexedSubfeature& indexedFeature,
-                   const std::size_t layoutFeatureIndex,
-                   const std::size_t dataFeatureIndex,
+                   std::size_t layoutFeatureIndex,
+                   std::size_t dataFeatureIndex,
                    std::u16string key,
-                   const float overscaling,
-                   const float iconRotation,
-                   const float textRotation,
+                   float overscaling,
+                   float iconRotation,
+                   float textRotation,
                    const std::array<float, 2>& variableTextOffset,
                    bool allowVerticalPlacement,
-                   const SymbolContent iconType = SymbolContent::None);
+                   SymbolContent iconType = SymbolContent::None);
 
     optional<size_t> getDefaultHorizontalPlacedTextIndex() const;
     const GeometryCoordinates& line() const;
@@ -83,8 +81,8 @@ public:
     bool hasText() const;
     bool hasIcon() const;
     bool hasSdfIcon() const;
-    const optional<SymbolQuad>& iconQuad() const;
-    const optional<SymbolQuad>& verticalIconQuad() const;
+    const optional<SymbolQuads>& iconQuads() const;
+    const optional<SymbolQuads>& verticalIconQuads() const;
     void releaseSharedData();
 
 private:
@@ -98,6 +96,7 @@ public:
     std::size_t centerJustifiedGlyphQuadsSize;
     std::size_t leftJustifiedGlyphQuadsSize;
     std::size_t verticalGlyphQuadsSize;
+    std::size_t iconQuadsSize;
 
     CollisionFeature textCollisionFeature;
     CollisionFeature iconCollisionFeature;
@@ -120,6 +119,10 @@ public:
     std::array<float, 2> variableTextOffset;
     bool singleLine;
     uint32_t crossTileID = 0;
+
+    static constexpr uint32_t invalidCrossTileID() { return std::numeric_limits<uint32_t>::max(); }
 };
+
+using SymbolInstanceReferences = std::vector<std::reference_wrapper<const SymbolInstance>>;
 
 } // namespace mbgl

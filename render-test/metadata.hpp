@@ -1,16 +1,27 @@
 #pragma once
 
+#include <mbgl/map/mode.hpp>
+#include <mbgl/renderer/query.hpp>
+#include <mbgl/storage/file_source.hpp>
 #include <mbgl/util/geo.hpp>
 #include <mbgl/util/rapidjson.hpp>
 #include <mbgl/util/size.hpp>
 
-#include <mbgl/map/mode.hpp>
-#include <mbgl/renderer/query.hpp>
-
 #include "filesystem.hpp"
 
+#include <list>
 #include <map>
 
+namespace mbgl {
+
+class Map;
+class HeadlessFrontend;
+namespace gfx {
+struct RenderingStats;
+}
+} // namespace mbgl
+
+class TestRunnerMapObserver;
 struct TestStatistics {
     TestStatistics() = default;
 
@@ -23,11 +34,16 @@ struct TestStatistics {
 
 struct TestPaths {
     TestPaths() = default;
-    TestPaths(mbgl::filesystem::path stylePath_, std::vector<mbgl::filesystem::path> expectations_)
-        : stylePath(std::move(stylePath_)), expectations(std::move(expectations_)) {}
+    TestPaths(mbgl::filesystem::path stylePath_,
+              std::vector<mbgl::filesystem::path> expectations_,
+              std::vector<mbgl::filesystem::path> expectedMetrics_)
+        : stylePath(std::move(stylePath_)),
+          expectations(std::move(expectations_)),
+          expectedMetrics(std::move(expectedMetrics_)) {}
 
     mbgl::filesystem::path stylePath;
     std::vector<mbgl::filesystem::path> expectations;
+    std::vector<mbgl::filesystem::path> expectedMetrics;
 
     std::string defaultExpectations() const {
         assert(!expectations.empty());
@@ -82,13 +98,36 @@ struct NetworkProbe {
     size_t transferred;
 };
 
+struct GfxProbe {
+    struct Memory {
+        Memory() = default;
+        Memory(int allocated_, int peak_) : allocated(allocated_), peak(peak_) {}
+
+        int allocated;
+        int peak;
+    };
+
+    GfxProbe() = default;
+    GfxProbe(const mbgl::gfx::RenderingStats&, const GfxProbe&);
+
+    int numBuffers;
+    int numDrawCalls;
+    int numFrameBuffers;
+    int numTextures;
+
+    Memory memIndexBuffers;
+    Memory memVertexBuffers;
+    Memory memTextures;
+};
+
 class TestMetrics {
 public:
-    bool isEmpty() const { return fileSize.empty() && memory.empty() && network.empty() && fps.empty(); }
+    bool isEmpty() const { return fileSize.empty() && memory.empty() && network.empty() && fps.empty() && gfx.empty(); }
     std::map<std::string, FileSizeProbe> fileSize;
     std::map<std::string, MemoryProbe> memory;
     std::map<std::string, NetworkProbe> network;
     std::map<std::string, FpsProbe> fps;
+    std::map<std::string, GfxProbe> gfx;
 };
 
 struct TestMetadata {
@@ -98,6 +137,7 @@ struct TestMetadata {
     mbgl::JSDocument document;
     bool renderTest = true;
     bool outputsImage = true;
+    bool ignoredTest = false;
 
     mbgl::Size size{ 512u, 512u };
     float pixelRatio = 1.0f;
@@ -127,9 +167,37 @@ struct TestMetadata {
     std::string expected;
     std::string diff;
 
+    TestMetrics metrics;
+    TestMetrics expectedMetrics;
+
+    // Results
+    unsigned metricsErrored = 0;
+    unsigned metricsFailed = 0;
+    unsigned renderErrored = 0;
+    unsigned renderFailed = 0;
+    unsigned labelCutOffFound = 0;
+    unsigned duplicationsCount = 0;
+
     std::string errorMessage;
     double difference = 0.0;
 
-    TestMetrics metrics;
-    TestMetrics expectedMetrics;
 };
+
+class TestContext {
+public:
+    virtual mbgl::HeadlessFrontend& getFrontend() = 0;
+    virtual mbgl::Map& getMap() = 0;
+    virtual mbgl::FileSource& getFileSource() = 0;
+    virtual TestRunnerMapObserver& getObserver() = 0;
+    virtual TestMetadata& getMetadata() = 0;
+
+    GfxProbe activeGfxProbe{};
+    GfxProbe baselineGfxProbe{};
+    bool gfxProbeActive = false;
+
+protected:
+    virtual ~TestContext() = default;
+};
+
+using TestOperation = std::function<bool(TestContext&)>;
+using TestOperations = std::list<TestOperation>;

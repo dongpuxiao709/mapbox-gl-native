@@ -21,11 +21,15 @@ public:
 
     FillExtrusionBucket(const PossiblyEvaluatedLayoutProperties&,
                         const std::map<std::string, Immutable<style::LayerProperties>>&,
-                        const float,
-                        const uint32_t);
+                        float,
+                        uint32_t);
 
-    void addFeature(const GeometryTileFeature&, const GeometryCollection&, const mbgl::ImagePositions&,
-                    const PatternLayerMap&, std::size_t) override;
+    void addFeature(const GeometryTileFeature&,
+                    const GeometryCollection&,
+                    const mbgl::ImagePositions&,
+                    const PatternLayerMap&,
+                    std::size_t,
+                    const CanonicalTileID&) override;
 
     bool hasData() const override;
 

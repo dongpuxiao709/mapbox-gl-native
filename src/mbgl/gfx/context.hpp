@@ -1,12 +1,13 @@
 #pragma once
 
 #include <mbgl/gfx/backend.hpp>
-#include <mbgl/gfx/renderbuffer.hpp>
 #include <mbgl/gfx/command_encoder.hpp>
 #include <mbgl/gfx/draw_scope.hpp>
 #include <mbgl/gfx/program.hpp>
-#include <mbgl/gfx/types.hpp>
+#include <mbgl/gfx/renderbuffer.hpp>
+#include <mbgl/gfx/rendering_stats.hpp>
 #include <mbgl/gfx/texture.hpp>
+#include <mbgl/gfx/types.hpp>
 
 namespace mbgl {
 
@@ -42,9 +43,8 @@ public:
     virtual void reduceMemoryUsage() = 0;
 
 public:
-    virtual std::unique_ptr<OffscreenTexture>
-        createOffscreenTexture(Size,
-                               TextureChannelDataType = TextureChannelDataType::UnsignedByte) = 0;
+    virtual std::unique_ptr<OffscreenTexture> createOffscreenTexture(Size, TextureChannelDataType) = 0;
+
 public:
     // Creates an empty texture with the specified dimensions.
     Texture createTexture(const Size size,
@@ -84,6 +84,8 @@ public:
 
 public:
     virtual std::unique_ptr<CommandEncoder> createCommandEncoder() = 0;
+
+    virtual const RenderingStats& renderingStats() const = 0;
 
 #if not defined(NDEBUG)
 public:

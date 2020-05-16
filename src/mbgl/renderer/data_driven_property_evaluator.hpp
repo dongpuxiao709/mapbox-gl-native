@@ -1,9 +1,11 @@
 #pragma once
 
-#include <mbgl/style/property_value.hpp>
-#include <mbgl/renderer/property_evaluation_parameters.hpp>
-#include <mbgl/renderer/possibly_evaluated_property_value.hpp>
 #include <mbgl/renderer/cross_faded_property_evaluator.hpp>
+#include <mbgl/renderer/possibly_evaluated_property_value.hpp>
+#include <mbgl/renderer/property_evaluation_parameters.hpp>
+#include <mbgl/style/property_value.hpp>
+
+#include <cmath>
 
 namespace mbgl {
 
@@ -26,14 +28,14 @@ public:
 
     ResultType operator()(const style::PropertyExpression<T>& expression) const {
         if (useIntegerZoom) {  // Compiler will optimize out the unused branch.
-            if (!expression.isFeatureConstant()) {
+            if (!expression.isFeatureConstant() || !expression.isRuntimeConstant()) {
                 auto returnExpression = expression;
                 returnExpression.useIntegerZoom = true;
                 return ResultType(returnExpression);
-            } 
-            return ResultType(expression.evaluate(floor(parameters.z)));
+            }
+            return ResultType(expression.evaluate(std::floor(parameters.z)));
         } else {
-            if (!expression.isFeatureConstant()) {
+            if (!expression.isFeatureConstant() || !expression.isRuntimeConstant()) {
                 return ResultType(expression);
             }
             return ResultType(expression.evaluate(parameters.z));
@@ -63,10 +65,10 @@ public:
     }
 
     ResultType operator()(const style::PropertyExpression<T>& expression) const {
-        if (!expression.isFeatureConstant()) {
+        if (!expression.isFeatureConstant() || !expression.isRuntimeConstant()) {
             return ResultType(expression);
         } else {
-            const T evaluated = expression.evaluate(floor(parameters.z));
+            const T evaluated = expression.evaluate(std::floor(parameters.z));
             return ResultType(calculate(evaluated, evaluated, evaluated));
         }
     }

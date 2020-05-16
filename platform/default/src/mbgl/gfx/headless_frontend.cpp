@@ -1,4 +1,5 @@
 #include <mbgl/gfx/backend_scope.hpp>
+#include <mbgl/gfx/context.hpp>
 #include <mbgl/gfx/headless_frontend.hpp>
 #include <mbgl/map/map.hpp>
 #include <mbgl/map/transform_state.hpp>
@@ -13,14 +14,14 @@ namespace mbgl {
 HeadlessFrontend::HeadlessFrontend(float pixelRatio_,
                                    gfx::HeadlessBackend::SwapBehaviour swapBehavior,
                                    const gfx::ContextMode contextMode,
-                                   const optional<std::string> localFontFamily)
+                                   const optional<std::string>& localFontFamily)
     : HeadlessFrontend({256, 256}, pixelRatio_, swapBehavior, contextMode, localFontFamily) {}
 
 HeadlessFrontend::HeadlessFrontend(Size size_,
                                    float pixelRatio_,
                                    gfx::HeadlessBackend::SwapBehaviour swapBehavior,
                                    const gfx::ContextMode contextMode,
-                                   const optional<std::string> localFontFamily)
+                                   const optional<std::string>& localFontFamily)
     : size(size_),
       pixelRatio(pixelRatio_),
       frameTime(0),
@@ -38,7 +39,7 @@ HeadlessFrontend::HeadlessFrontend(Size size_,
               // Copy the shared pointer here so that the parameters aren't destroyed while `render(...)` is
               // still using them.
               auto updateParameters_ = updateParameters;
-              renderer->render(*updateParameters_);
+              renderer->render(updateParameters_);
 
               auto endTime = mbgl::util::MonotonicTimer::now();
               frameTime = (endTime - startTime).count();
@@ -139,19 +140,20 @@ PremultipliedImage HeadlessFrontend::readStillImage() {
     return backend->readStillImage();
 }
 
-PremultipliedImage HeadlessFrontend::render(Map& map) {
-    PremultipliedImage result;
+HeadlessFrontend::RenderResult HeadlessFrontend::render(Map& map) {
+    HeadlessFrontend::RenderResult result;
     std::exception_ptr error;
 
-    map.renderStill([&](std::exception_ptr e) {
+    map.renderStill([&](const std::exception_ptr& e) {
         if (e) {
             error = e;
         } else {
-            result = backend->readStillImage();
+            result.image = backend->readStillImage();
+            result.stats = getBackend()->getContext().renderingStats();
         }
     });
 
-    while (!result.valid() && !error) {
+    while (!result.image.valid() && !error) {
         util::RunLoop::Get()->runOnce();
     }
 

@@ -8,7 +8,6 @@
 #include <mbgl/style/layer.hpp>
 #include <mbgl/style/filter.hpp>
 #include <mbgl/style/property_value.hpp>
-#include <mbgl/style/expression/formatted.hpp>
 #include <mbgl/util/color.hpp>
 
 #include <vector>
@@ -18,16 +17,10 @@ namespace style {
 
 class TransitionOptions;
 
-class LineLayer : public Layer {
+class LineLayer final : public Layer {
 public:
     LineLayer(const std::string& layerID, const std::string& sourceID);
-    ~LineLayer() final;
-
-    // Dynamic properties
-    optional<conversion::Error> setLayoutProperty(const std::string& name, const conversion::Convertible& value) final;
-    optional<conversion::Error> setPaintProperty(const std::string& name, const conversion::Convertible& value) final;
-
-    StyleProperty getProperty(const std::string& name) const final;
+    ~LineLayer() override;
 
     // Layout properties
 
@@ -46,6 +39,10 @@ public:
     static PropertyValue<float> getDefaultLineRoundLimit();
     const PropertyValue<float>& getLineRoundLimit() const;
     void setLineRoundLimit(const PropertyValue<float>&);
+
+    static PropertyValue<float> getDefaultLineSortKey();
+    const PropertyValue<float>& getLineSortKey() const;
+    void setLineSortKey(const PropertyValue<float>&);
 
     // Paint properties
 
@@ -91,9 +88,9 @@ public:
     void setLineOpacityTransition(const TransitionOptions&);
     TransitionOptions getLineOpacityTransition() const;
 
-    static PropertyValue<std::string> getDefaultLinePattern();
-    const PropertyValue<std::string>& getLinePattern() const;
-    void setLinePattern(const PropertyValue<std::string>&);
+    static PropertyValue<expression::Image> getDefaultLinePattern();
+    const PropertyValue<expression::Image>& getLinePattern() const;
+    void setLinePattern(const PropertyValue<expression::Image>&);
     void setLinePatternTransition(const TransitionOptions&);
     TransitionOptions getLinePatternTransition() const;
 
@@ -125,6 +122,12 @@ public:
     std::unique_ptr<Layer> cloneRef(const std::string& id) const final;
 
 protected:
+    // Dynamic properties
+    optional<conversion::Error> setPropertyInternal(const std::string& name, const conversion::Convertible& value) final;
+
+    StyleProperty getProperty(const std::string& name) const final;
+    Value serialize() const final;
+
     Mutable<Layer::Impl> mutableBaseImpl() const final;
 };
 

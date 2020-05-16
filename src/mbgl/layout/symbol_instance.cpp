@@ -25,24 +25,29 @@ SymbolInstanceSharedData::SymbolInstanceSharedData(GeometryCoordinates line_,
                                                    const style::SymbolLayoutProperties::Evaluated& layout,
                                                    const style::SymbolPlacementType textPlacement,
                                                    const std::array<float, 2>& textOffset,
-                                                   const GlyphPositions& positions,
-						   bool allowVerticalPlacement) : line(std::move(line_)) {
+                                                   const ImageMap& imageMap,
+                                                   float iconRotation,
+                                                   SymbolContent iconType,
+                                                   bool hasIconTextFit,
+                                                   bool allowVerticalPlacement)
+    : line(std::move(line_)) {
     // Create the quads used for rendering the icon and glyphs.
     if (shapedIcon) {
-        iconQuad = getIconQuad(*shapedIcon, getAnyShaping(shapedTextOrientations).writingMode);
+        iconQuads = getIconQuads(*shapedIcon, iconRotation, iconType, hasIconTextFit);
         if (verticallyShapedIcon) {
-            verticalIconQuad = getIconQuad(*verticallyShapedIcon, shapedTextOrientations.vertical.writingMode);
+            verticalIconQuads = getIconQuads(*verticallyShapedIcon, iconRotation, iconType, hasIconTextFit);
         }
     }
 
     bool singleLineInitialized = false;
     const auto initHorizontalGlyphQuads = [&] (SymbolQuads& quads, const Shaping& shaping) {
         if (!shapedTextOrientations.singleLine) {
-            quads = getGlyphQuads(shaping, textOffset, layout, textPlacement, positions, allowVerticalPlacement);
+            quads = getGlyphQuads(shaping, textOffset, layout, textPlacement, imageMap, allowVerticalPlacement);
             return;
         }
         if (!singleLineInitialized) {
-            rightJustifiedGlyphQuads = getGlyphQuads(shaping, textOffset, layout, textPlacement, positions, allowVerticalPlacement);
+            rightJustifiedGlyphQuads =
+                getGlyphQuads(shaping, textOffset, layout, textPlacement, imageMap, allowVerticalPlacement);
             singleLineInitialized = true;
         }
     };
@@ -60,7 +65,8 @@ SymbolInstanceSharedData::SymbolInstanceSharedData(GeometryCoordinates line_,
     }
 
     if (shapedTextOrientations.vertical) {
-        verticalGlyphQuads = getGlyphQuads(shapedTextOrientations.vertical, textOffset, layout, textPlacement, positions, allowVerticalPlacement);
+        verticalGlyphQuads = getGlyphQuads(
+            shapedTextOrientations.vertical, textOffset, layout, textPlacement, imageMap, allowVerticalPlacement);
     }
 }
 
@@ -125,6 +131,7 @@ SymbolInstance::SymbolInstance(Anchor& anchor_,
     centerJustifiedGlyphQuadsSize = sharedData->centerJustifiedGlyphQuads.size();
     leftJustifiedGlyphQuadsSize = sharedData->leftJustifiedGlyphQuads.size();
     verticalGlyphQuadsSize = sharedData->verticalGlyphQuads.size();
+    iconQuadsSize = sharedData->iconQuads ? sharedData->iconQuads->size() : 0;
 
     if (rightJustifiedGlyphQuadsSize || centerJustifiedGlyphQuadsSize || leftJustifiedGlyphQuadsSize) {
         writingModes |= WritingModeType::Horizontal;
@@ -160,11 +167,11 @@ const SymbolQuads& SymbolInstance::verticalGlyphQuads() const {
     return sharedData->verticalGlyphQuads;
 }
 
-const optional<SymbolQuad>& SymbolInstance::iconQuad() const {
+const optional<SymbolQuads>& SymbolInstance::iconQuads() const {
     assert(sharedData);
-    return sharedData->iconQuad;
+    return sharedData->iconQuads;
 }
-    
+
 bool SymbolInstance::hasText() const {
     return static_cast<bool>(symbolContent & SymbolContent::Text);
 }
@@ -177,9 +184,9 @@ bool SymbolInstance::hasSdfIcon() const {
     return static_cast<bool>(symbolContent & SymbolContent::IconSDF);
 }
 
-const optional<SymbolQuad>& SymbolInstance::verticalIconQuad() const {
+const optional<SymbolQuads>& SymbolInstance::verticalIconQuads() const {
     assert(sharedData);
-    return sharedData->verticalIconQuad;
+    return sharedData->verticalIconQuads;
 }
 
 void SymbolInstance::releaseSharedData() {

@@ -188,47 +188,109 @@ void drawText(const DrawFn& draw,
     const auto& evaluated = getEvaluated<SymbolLayerProperties>(renderData.layerProperties);
     const auto& layout = *bucket.layout;
 
-    const gfx::TextureBinding textureBinding{ tile.getGlyphAtlasTexture().getResource(),
-                                              gfx::TextureFilterType::Linear };
-
     auto values = textPropertyValues(evaluated, layout);
     const auto& paintPropertyValues = RenderSymbolLayer::textPaintProperties(evaluated);
 
     const bool alongLine = layout.get<SymbolPlacement>() != SymbolPlacementType::Point &&
         layout.get<TextRotationAlignment>() == AlignmentType::Map;
 
-    const Size& texsize = tile.getGlyphAtlasTexture().size;
+    const Size& glyphTexSize = tile.getGlyphAtlasTexture().size;
+    const gfx::TextureBinding glyphTextureBinding{tile.getGlyphAtlasTexture().getResource(),
+                                                  gfx::TextureFilterType::Linear};
 
-    if (values.hasHalo) {
-        draw(parameters.programs.getSymbolLayerPrograms().symbolGlyph,
-            SymbolSDFTextProgram::layoutUniformValues(true, bucket.hasVariablePlacement, values, texsize, parameters.pixelsToGLUnits, parameters.pixelRatio, alongLine, tile, parameters.state, parameters.symbolFadeChange, SymbolSDFPart::Halo),
-            bucket.text,
-            textSegments,
-            bucket.textSizeBinder,
-            bucketPaintProperties.textBinders,
-            paintPropertyValues,
-            SymbolSDFTextProgram::TextureBindings{
-                textureBinding
-            },
-            "halo");
-    }
+    const auto drawGlyphs = [&](auto& program, const auto& uniforms, const auto& textures, SymbolSDFPart part) {
+        draw(program,
+             uniforms,
+             bucket.text,
+             textSegments,
+             bucket.textSizeBinder,
+             bucketPaintProperties.textBinders,
+             paintPropertyValues,
+             textures,
+             (part == SymbolSDFPart::Halo) ? "halo" : "fill");
+    };
 
-    if (values.hasFill) {
-        draw(parameters.programs.getSymbolLayerPrograms().symbolGlyph,
-            SymbolSDFTextProgram::layoutUniformValues(true, bucket.hasVariablePlacement, values, texsize, parameters.pixelsToGLUnits, parameters.pixelRatio, alongLine, tile, parameters.state, parameters.symbolFadeChange, SymbolSDFPart::Fill),
-            bucket.text,
-            textSegments,
-            bucket.textSizeBinder,
-            bucketPaintProperties.textBinders,
-            paintPropertyValues,
-            SymbolSDFTextProgram::TextureBindings{
-                textureBinding
-            },
-            "fill");
+    if (bucket.iconsInText) {
+        const ZoomEvaluatedSize partiallyEvaluatedTextSize =
+            bucket.textSizeBinder->evaluateForZoom(parameters.state.getZoom());
+        const bool transformed = values.rotationAlignment == AlignmentType::Map || parameters.state.getPitch() != 0;
+        const Size& iconTexSize = tile.getIconAtlasTexture().size;
+        const gfx::TextureBinding iconTextureBinding{
+            tile.getIconAtlasTexture().getResource(),
+            parameters.state.isChanging() || transformed || !partiallyEvaluatedTextSize.isZoomConstant
+                ? gfx::TextureFilterType::Linear
+                : gfx::TextureFilterType::Nearest};
+        if (values.hasHalo) {
+            drawGlyphs(parameters.programs.getSymbolLayerPrograms().symbolTextAndIcon,
+                       SymbolTextAndIconProgram::layoutUniformValues(bucket.hasVariablePlacement,
+                                                                     values,
+                                                                     glyphTexSize,
+                                                                     iconTexSize,
+                                                                     parameters.pixelsToGLUnits,
+                                                                     parameters.pixelRatio,
+                                                                     alongLine,
+                                                                     tile,
+                                                                     parameters.state,
+                                                                     parameters.symbolFadeChange,
+                                                                     SymbolSDFPart::Halo),
+                       SymbolTextAndIconProgram::TextureBindings{glyphTextureBinding, iconTextureBinding},
+                       SymbolSDFPart::Halo);
+        }
+
+        if (values.hasFill) {
+            drawGlyphs(parameters.programs.getSymbolLayerPrograms().symbolTextAndIcon,
+                       SymbolTextAndIconProgram::layoutUniformValues(bucket.hasVariablePlacement,
+                                                                     values,
+                                                                     glyphTexSize,
+                                                                     iconTexSize,
+                                                                     parameters.pixelsToGLUnits,
+                                                                     parameters.pixelRatio,
+                                                                     alongLine,
+                                                                     tile,
+                                                                     parameters.state,
+                                                                     parameters.symbolFadeChange,
+                                                                     SymbolSDFPart::Fill),
+                       SymbolTextAndIconProgram::TextureBindings{glyphTextureBinding, iconTextureBinding},
+                       SymbolSDFPart::Fill);
+        }
+    } else {
+        if (values.hasHalo) {
+            drawGlyphs(parameters.programs.getSymbolLayerPrograms().symbolGlyph,
+                       SymbolSDFTextProgram::layoutUniformValues(true,
+                                                                 bucket.hasVariablePlacement,
+                                                                 values,
+                                                                 glyphTexSize,
+                                                                 parameters.pixelsToGLUnits,
+                                                                 parameters.pixelRatio,
+                                                                 alongLine,
+                                                                 tile,
+                                                                 parameters.state,
+                                                                 parameters.symbolFadeChange,
+                                                                 SymbolSDFPart::Halo),
+                       SymbolSDFTextProgram::TextureBindings{glyphTextureBinding},
+                       SymbolSDFPart::Halo);
+        }
+
+        if (values.hasFill) {
+            drawGlyphs(parameters.programs.getSymbolLayerPrograms().symbolGlyph,
+                       SymbolSDFTextProgram::layoutUniformValues(true,
+                                                                 bucket.hasVariablePlacement,
+                                                                 values,
+                                                                 glyphTexSize,
+                                                                 parameters.pixelsToGLUnits,
+                                                                 parameters.pixelRatio,
+                                                                 alongLine,
+                                                                 tile,
+                                                                 parameters.state,
+                                                                 parameters.symbolFadeChange,
+                                                                 SymbolSDFPart::Fill),
+                       SymbolSDFTextProgram::TextureBindings{glyphTextureBinding},
+                       SymbolSDFPart::Fill);
+        }
     }
 }
 
-inline const SymbolLayer::Impl& impl(const Immutable<style::Layer::Impl>& impl) {
+inline const SymbolLayer::Impl& impl_cast(const Immutable<style::Layer::Impl>& impl) {
     assert(impl->getTypeInfo() == SymbolLayer::Impl::staticTypeInfo());
     return static_cast<const SymbolLayer::Impl&>(*impl);
 }
@@ -237,14 +299,14 @@ inline const SymbolLayer::Impl& impl(const Immutable<style::Layer::Impl>& impl) 
 
 RenderSymbolLayer::RenderSymbolLayer(Immutable<style::SymbolLayer::Impl> _impl)
     : RenderLayer(makeMutable<SymbolLayerProperties>(std::move(_impl))),
-      unevaluated(impl(baseImpl).paint.untransitioned()) {
-}
+      unevaluated(impl_cast(baseImpl).paint.untransitioned()) {}
 
 RenderSymbolLayer::~RenderSymbolLayer() = default;
 
 void RenderSymbolLayer::transition(const TransitionParameters& parameters) {
-    unevaluated = impl(baseImpl).paint.transitioned(parameters, std::move(unevaluated));
-    hasFormatSectionOverrides = SymbolLayerPaintPropertyOverrides::hasOverrides(impl(baseImpl).layout.get<TextField>());
+    unevaluated = impl_cast(baseImpl).paint.transitioned(parameters, std::move(unevaluated));
+    hasFormatSectionOverrides =
+        SymbolLayerPaintPropertyOverrides::hasOverrides(impl_cast(baseImpl).layout.get<TextField>());
 }
 
 void RenderSymbolLayer::evaluate(const PropertyEvaluationParameters& parameters) {
@@ -252,7 +314,7 @@ void RenderSymbolLayer::evaluate(const PropertyEvaluationParameters& parameters)
         staticImmutableCast<SymbolLayer::Impl>(baseImpl),
         unevaluated.evaluate(parameters));
     auto& evaluated = properties->evaluated;
-    auto& layout = impl(baseImpl).layout;
+    auto& layout = impl_cast(baseImpl).layout;
 
     if (hasFormatSectionOverrides) {
         SymbolLayerPaintPropertyOverrides::setOverrides(layout, evaluated);
@@ -284,7 +346,7 @@ void RenderSymbolLayer::render(PaintParameters& parameters) {
         return;
     }
 
-    const bool sortFeaturesByKey = !impl(baseImpl).layout.get<SymbolSortKey>().isUndefined();
+    const bool sortFeaturesByKey = !impl_cast(baseImpl).layout.get<SymbolSortKey>().isUndefined();
     std::multiset<RenderableSegment> renderableSegments;
 
     const auto draw = [&parameters, this] (auto& programInstance,
@@ -361,6 +423,8 @@ void RenderSymbolLayer::render(PaintParameters& parameters) {
         auto& bucket = static_cast<SymbolBucket&>(*renderData->bucket);
         assert(bucket.paintProperties.find(getID()) != bucket.paintProperties.end());
         const auto& bucketPaintProperties = bucket.paintProperties.at(getID());
+
+        bucket.justReloaded = false;
 
         auto addRenderables = [&renderableSegments, &tile, renderData, &bucketPaintProperties, it = renderableSegments.begin()] (auto& segments, const SymbolType type) mutable {
             for (auto& segment : segments) {
@@ -511,6 +575,7 @@ void RenderSymbolLayer::prepare(const LayerPrepareParameters& params) {
     addRenderPassesFromTiles();
 
     placementData.clear();
+
     for (const RenderTile& renderTile : *renderTiles) {
         auto* bucket = static_cast<SymbolBucket*>(renderTile.getBucket(*baseImpl));
         if (bucket && bucket->bucketLeaderID == getID()) {
@@ -518,7 +583,22 @@ void RenderSymbolLayer::prepare(const LayerPrepareParameters& params) {
             const Tile* tile = params.source->getRenderedTile(renderTile.id);
             assert(tile);
             assert(tile->kind == Tile::Kind::Geometry);
-            placementData.push_back({*bucket, renderTile, static_cast<const GeometryTile*>(tile)->getFeatureIndex()});
+
+            auto featureIndex = static_cast<const GeometryTile*>(tile)->getFeatureIndex();
+
+            if (bucket->sortKeyRanges.empty()) {
+                placementData.push_back({*bucket, renderTile, featureIndex, baseImpl->source, nullopt});
+            } else {
+                for (const auto& sortKeyRange : bucket->sortKeyRanges) {
+                    BucketPlacementData layerData{*bucket, renderTile, featureIndex, baseImpl->source, sortKeyRange};
+                    auto sortPosition = std::upper_bound(
+                        placementData.cbegin(), placementData.cend(), layerData, [](const auto& lhs, const auto& rhs) {
+                            assert(lhs.sortKeyRange && rhs.sortKeyRange);
+                            return lhs.sortKeyRange->sortKey < rhs.sortKeyRange->sortKey;
+                        });
+                    placementData.insert(sortPosition, std::move(layerData));
+                }
+            }
         }
     }
 }

@@ -1,5 +1,5 @@
 // NOTE: DO NOT CHANGE THIS FILE. IT IS AUTOMATICALLY GENERATED.
-
+// clang-format off
 #include <mbgl/programs/hillshade_prepare_program.hpp>
 #include <mbgl/programs/gl/preludes.hpp>
 #include <mbgl/programs/gl/shader_source.hpp>
@@ -15,9 +15,9 @@ struct ShaderSource;
 template <>
 struct ShaderSource<HillshadePrepareProgram> {
     static constexpr const char* name = "hillshade_prepare";
-    static constexpr const uint8_t hash[8] = { 0xbd, 0xa0, 0x8a, 0x88, 0x91, 0xe3, 0x73, 0x66 };
-    static constexpr const auto vertexOffset = 27698;
-    static constexpr const auto fragmentOffset = 27991;
+    static constexpr const uint8_t hash[8] = {0xbd, 0xa0, 0x8a, 0x88, 0x91, 0xe3, 0x73, 0x66};
+    static constexpr const auto vertexOffset = 27906;
+    static constexpr const auto fragmentOffset = 28199;
 };
 
 constexpr const char* ShaderSource<HillshadePrepareProgram>::name;
@@ -135,4 +135,4 @@ void main() {
 }
 
 */
-
+// clang-format on

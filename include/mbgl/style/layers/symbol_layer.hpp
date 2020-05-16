@@ -17,16 +17,10 @@ namespace style {
 
 class TransitionOptions;
 
-class SymbolLayer : public Layer {
+class SymbolLayer final : public Layer {
 public:
     SymbolLayer(const std::string& layerID, const std::string& sourceID);
-    ~SymbolLayer() final;
-
-    // Dynamic properties
-    optional<conversion::Error> setLayoutProperty(const std::string& name, const conversion::Convertible& value) final;
-    optional<conversion::Error> setPaintProperty(const std::string& name, const conversion::Convertible& value) final;
-
-    StyleProperty getProperty(const std::string& name) const final;
+    ~SymbolLayer() override;
 
     // Layout properties
 
@@ -42,9 +36,9 @@ public:
     const PropertyValue<bool>& getIconIgnorePlacement() const;
     void setIconIgnorePlacement(const PropertyValue<bool>&);
 
-    static PropertyValue<std::string> getDefaultIconImage();
-    const PropertyValue<std::string>& getIconImage() const;
-    void setIconImage(const PropertyValue<std::string>&);
+    static PropertyValue<expression::Image> getDefaultIconImage();
+    const PropertyValue<expression::Image>& getIconImage() const;
+    void setIconImage(const PropertyValue<expression::Image>&);
 
     static PropertyValue<bool> getDefaultIconKeepUpright();
     const PropertyValue<bool>& getIconKeepUpright() const;
@@ -290,6 +284,12 @@ public:
     std::unique_ptr<Layer> cloneRef(const std::string& id) const final;
 
 protected:
+    // Dynamic properties
+    optional<conversion::Error> setPropertyInternal(const std::string& name, const conversion::Convertible& value) final;
+
+    StyleProperty getProperty(const std::string& name) const final;
+    Value serialize() const final;
+
     Mutable<Layer::Impl> mutableBaseImpl() const final;
 };
 

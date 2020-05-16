@@ -1,9 +1,11 @@
 #pragma once
 
-#include <mbgl/style/property_expression.hpp>
 #include <mbgl/renderer/cross_faded_property_evaluator.hpp>
+#include <mbgl/style/property_expression.hpp>
 #include <mbgl/util/interpolate.hpp>
 #include <mbgl/util/variant.hpp>
+
+#include <cmath>
 
 namespace mbgl {
 
@@ -51,6 +53,14 @@ public:
     }
 
     template <class Feature>
+    T evaluate(const Feature& feature, float zoom, const CanonicalTileID& canonical, T defaultValue) const {
+        return this->match([&](const T& constant_) { return constant_; },
+                           [&](const style::PropertyExpression<T>& expression) {
+                               return expression.evaluate(zoom, feature, canonical, defaultValue);
+                           });
+    }
+
+    template <class Feature>
     T evaluate(const Feature& feature, float zoom, const FeatureState& featureState, T defaultValue) const {
         return this->match([&](const T& constant_) { return constant_; },
                            [&](const style::PropertyExpression<T>& expression) {
@@ -93,16 +103,22 @@ public:
     }
 
     template <class Feature>
-    Faded<T> evaluate(const Feature& feature, float zoom, T defaultValue) const {
+    Faded<T> evaluate(const Feature& feature,
+                      float zoom,
+                      const std::set<std::string>& availableImages,
+                      const CanonicalTileID& canonical,
+                      T defaultValue) const {
         return this->match(
             [&] (const Faded<T>& constant_) { return constant_; },
             [&] (const style::PropertyExpression<T>& expression) {
                 if (!expression.isZoomConstant()) {
-                    const T min = expression.evaluate(floor(zoom), feature, defaultValue);
-                    const T max = expression.evaluate(floor(zoom) + 1, feature, defaultValue);
+                    const T min =
+                        expression.evaluate(std::floor(zoom), feature, availableImages, canonical, defaultValue);
+                    const T max =
+                        expression.evaluate(std::floor(zoom) + 1, feature, availableImages, canonical, defaultValue);
                     return Faded<T> {min, max};
                 } else {
-                    const T evaluated = expression.evaluate(feature, defaultValue);
+                    const T evaluated = expression.evaluate(feature, availableImages, defaultValue);
                     return Faded<T> {evaluated, evaluated};
                 }
             }

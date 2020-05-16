@@ -14,10 +14,6 @@ namespace mbgl {
 
 class OverscaledTileID;
 
-namespace gl {
-class UploadPass;
-} // namespace gl
-
 class DebugBucket : private util::noncopyable {
 public:
     DebugBucket(const OverscaledTileID& id,
@@ -40,9 +36,10 @@ public:
     gfx::IndexVector<gfx::Lines> indices;
 
     SegmentVector<DebugAttributes> segments;
+    SegmentVector<DebugAttributes> tileBorderSegments;
     optional<gfx::VertexBuffer<DebugLayoutVertex>> vertexBuffer;
     optional<gfx::IndexBuffer> indexBuffer;
-    const std::string drawScopeID;
+    optional<gfx::Texture> texture;
 };
 
 } // namespace mbgl

@@ -14,6 +14,8 @@
 
 #include <args.hxx>
 
+#include <regex>
+
 using namespace mbgl;
 using namespace mbgl::style;
 using namespace mbgl::style::conversion;
@@ -104,8 +106,7 @@ optional<Value> toValue(const JSValue& jsvalue) {
 
 style::expression::type::Type stringToType(const std::string& type) {
     using namespace style::expression;
-    if (type == "string"s || type == "number-format"s ||
-        type == "image"s) { // TODO: replace once we implement image expressions
+    if (type == "string"s || type == "number-format"s) {
         return type::String;
     } else if (type == "number"s) {
         return type::Number;
@@ -119,6 +120,8 @@ style::expression::type::Type stringToType(const std::string& type) {
         return type::Value;
     } else if (type == "formatted"s) {
         return type::Formatted;
+    } else if (type == "resolvedImage"s) {
+        return type::Image;
     }
 
     // Should not reach.
@@ -253,6 +256,28 @@ bool parseInputs(const JSValue& inputsValue, TestData& data) {
             heatmapDensity = evaluationContext["heatmapDensity"].GetDouble();
         }
 
+        // Parse canonicalID
+        optional<CanonicalTileID> canonical;
+        if (evaluationContext.HasMember("canonicalID")) {
+            const auto& canonicalIDObject = evaluationContext["canonicalID"];
+            assert(canonicalIDObject.IsObject());
+            assert(canonicalIDObject.HasMember("z") && canonicalIDObject["z"].IsNumber());
+            assert(canonicalIDObject.HasMember("x") && canonicalIDObject["x"].IsNumber());
+            assert(canonicalIDObject.HasMember("y") && canonicalIDObject["y"].IsNumber());
+            canonical = CanonicalTileID(
+                canonicalIDObject["z"].GetUint(), canonicalIDObject["x"].GetUint(), canonicalIDObject["y"].GetUint());
+        }
+
+        // Parse availableImages
+        std::set<std::string> availableImages;
+        if (evaluationContext.HasMember("availableImages")) {
+            assert(evaluationContext["availableImages"].IsArray());
+            for (const auto& image : evaluationContext["availableImages"].GetArray()) {
+                assert(image.IsString());
+                availableImages.emplace(toString(image));
+            }
+        }
+
         // Parse feature properties
         Feature feature(mapbox::geometry::point<double>(0.0, 0.0));
         const auto& featureObject = input[1].GetObject();
@@ -271,7 +296,11 @@ bool parseInputs(const JSValue& inputsValue, TestData& data) {
             feature.id = mapbox::geojson::convert<mapbox::feature::identifier>(featureObject["id"]);
         }
 
-        data.inputs.emplace_back(std::move(zoom), std::move(heatmapDensity), std::move(feature));
+        data.inputs.emplace_back(std::move(zoom),
+                                 std::move(heatmapDensity),
+                                 std::move(canonical),
+                                 std::move(availableImages),
+                                 std::move(feature));
     }
     return true;
 }
@@ -282,11 +311,11 @@ std::tuple<filesystem::path, std::vector<filesystem::path>, bool, uint32_t> pars
     args::ArgumentParser argumentParser("Mapbox GL Expression Test Runner");
 
     args::HelpFlag helpFlag(argumentParser, "help", "Display this help menu", { 'h', "help" });
-    args::Flag shuffleFlag(argumentParser, "shuffle", "Toggle shuffling the tests order",
-                           { 's', "shuffle" });
+    args::Flag shuffleFlag(argumentParser, "shuffle", "Toggle shuffling the tests order", {'s', "shuffle"});
     args::ValueFlag<uint32_t> seedValue(argumentParser, "seed", "Shuffle seed (default: random)",
                                         { "seed" });
     args::PositionalList<std::string> testNameValues(argumentParser, "URL", "Test name(s)");
+    args::ValueFlag<std::string> testFilterValue(argumentParser, "filter", "Test filter regex", {'f', "filter"});
 
     try {
         argumentParser.ParseCLI(argc, argv);
@@ -324,6 +353,7 @@ std::tuple<filesystem::path, std::vector<filesystem::path>, bool, uint32_t> pars
         paths.emplace_back(rootPath);
     }
 
+    auto testFilter = testFilterValue ? args::get(testFilterValue) : std::string{};
     // Recursively traverse through the test paths and collect test directories containing "test.json".
     std::vector<filesystem::path> testPaths;
     testPaths.reserve(paths.size());
@@ -334,6 +364,9 @@ std::tuple<filesystem::path, std::vector<filesystem::path>, bool, uint32_t> pars
         }
 
         for (auto& testPath : filesystem::recursive_directory_iterator(path)) {
+            if (!testFilter.empty() && !std::regex_search(testPath.path().string(), std::regex(testFilter))) {
+                continue;
+            }
             if (testPath.path().filename() == "test.json") {
                 testPaths.emplace_back(testPath.path());
             }
@@ -348,7 +381,7 @@ std::tuple<filesystem::path, std::vector<filesystem::path>, bool, uint32_t> pars
 
 Ignores parseExpressionIgnores() {
     Ignores ignores;
-    const auto mainIgnoresPath = filesystem::path(TEST_RUNNER_ROOT_PATH).append("platform/node/test/ignores.json");
+    const auto mainIgnoresPath = filesystem::path(TEST_RUNNER_ROOT_PATH).append("metrics/ignores/platform-all.json");
     auto maybeIgnores = readJson(mainIgnoresPath);
     if (!maybeIgnores.is<JSDocument>()) { // NOLINT
         return {};

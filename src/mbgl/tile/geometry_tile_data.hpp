@@ -25,6 +25,7 @@ public:
     template <class... Args>
     GeometryCoordinates(Args&&... args) : std::vector<GeometryCoordinate>(std::forward<Args>(args)...) {}
     GeometryCoordinates(std::initializer_list<GeometryCoordinate> args) : std::vector<GeometryCoordinate>(args) {}
+    GeometryCoordinates() = default;
 };
 
 class GeometryCollection : public std::vector<GeometryCoordinates> {
@@ -35,6 +36,7 @@ public:
     GeometryCollection(std::initializer_list<GeometryCoordinates> args) : std::vector<GeometryCoordinates>(args) {}
     GeometryCollection(GeometryCollection&&) = default;
     GeometryCollection& operator=(GeometryCollection&&) = default;
+    GeometryCollection() = default;
 
     GeometryCollection clone() const { return GeometryCollection(*this); }
 
@@ -79,6 +81,10 @@ std::vector<GeometryCollection> classifyRings(const GeometryCollection&);
 
 // Truncate polygon to the largest `maxHoles` inner rings by area.
 void limitHoles(GeometryCollection&, uint32_t maxHoles);
+
+Feature::geometry_type convertGeometry(const GeometryTileFeature& geometryTileFeature, const CanonicalTileID& tileID);
+
+GeometryCollection convertGeometry(const Feature::geometry_type& geometryTileFeature, const CanonicalTileID& tileID);
 
 // convert from GeometryTileFeature to Feature (eventually we should eliminate GeometryTileFeature)
 Feature convertFeature(const GeometryTileFeature&, const CanonicalTileID&);
